@@ -1,3 +1,7 @@
+# MediaPipe models and video files
+tasks/
+*.mp4
+
 # Python-generated files
 __pycache__/
 *.py[oc]
