@@ -78,4 +78,4 @@ def process_video(input_path, output_path):
     print(f"Processing complete. Result saved to: {output_path}")
 
 if __name__ == "__main__":
-    process_video("input.mp4", "output.mp4")
+    process_video("videos/input.mp4", "outputs/output.mp4")
