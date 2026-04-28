@@ -178,6 +178,133 @@ Rules:
 - Failed jobs require `error_type` and `error_message`.
 - Successful jobs that produce artifacts require `output_refs`.
 
+## Slice Roadmap
+
+The MVP should advance through small vertical slices. Each slice must preserve the artifact/state split, keep generated paths inside the project data root, and pass `uv run pytest` before the next slice starts.
+
+### Slice 1: Schema, Storage, Jobs
+
+Status: DONE.
+
+Purpose: establish strict project contracts before adding computer vision or UI behavior.
+
+Scope:
+
+- `pickleball_ai/schema.py`: strict Pydantic models, enums, schema versions, and core invariants.
+- `pickleball_ai/storage.py`: safe project paths, project layout creation, JSON/JSONL IO, and atomic writes.
+- `pickleball_ai/jobs.py`: replayable processing job lifecycle and artifact manifests.
+- Tests for schema validation, path safety, storage behavior, and job transitions.
+
+### Slice 2: Replayable Pose Extraction
+
+Status: DONE.
+
+Purpose: convert the prototype MediaPipe script into a replayable job that writes portable artifacts.
+
+Scope:
+
+- `pickleball_ai/pose.py`: frame source abstraction, MediaPipe detector wrapper, pose frame serialization, and pose extraction job.
+- `pose_detector.py`: thin CLI wrapper that creates/uses a project and runs pose extraction.
+- Output: `artifacts/jobs/{job_id}/pose.jsonl`.
+- Tests with fake frame sources and fake detectors.
+- Smoke test with a short local clip before using full match videos.
+
+### Slice 3: Annotation and Coverage Core
+
+Status: NEXT.
+
+Purpose: create the source of truth for human labels and reviewed/unreviewed video coverage before building queue or UI features.
+
+Scope:
+
+- `pickleball_ai/annotations.py`: append-only annotation events, current annotation projection, correction provenance, and validation.
+- `pickleball_ai/coverage.py`: coverage events and latest-state projection.
+- Support coverage states: `unreviewed`, `reviewed`, `skipped_non_game`, and `needs_recheck`.
+- Outputs:
+  - `state/annotation_events.jsonl`
+  - `state/annotations.jsonl`
+  - `state/coverage.jsonl`
+- Tests for event projection, invalid time windows, overlap handling, latest-state wins, and the rule that unreviewed time is not treated as negative training data.
+
+### Slice 4: Player and Identity Session Core
+
+Purpose: separate visual tracks from player identity so YouTube cuts, replays, and camera changes can be corrected without corrupting labels.
+
+Scope:
+
+- `pickleball_ai/players.py`: player definitions such as `A`, `B`, `C`, `D`.
+- `pickleball_ai/identity.py`: identity-session events that map a track or manual selection to a player over a time window.
+- Outputs:
+  - `state/players.json`
+  - `state/identity_sessions.jsonl`
+  - `state/tracks.jsonl` only when track data exists
+- Tests for overlapping identity sessions, cut/replay invalidation, missing identity, and annotation references to players.
+
+### Slice 5: Hit Candidate Generation
+
+Purpose: generate reviewable hit-event candidates from pose data without pretending they are final labels.
+
+Scope:
+
+- `pickleball_ai/events.py`: pose-motion heuristics over `pose.jsonl`.
+- Candidate features may include wrist acceleration, shoulder/hip rotation, player movement peaks, and nearby pose confidence.
+- Output: `artifacts/jobs/{job_id}/hit_candidates.jsonl`.
+- Candidate records must include confidence, source artifact refs, and enough debug features to explain why the candidate exists.
+- Tests using synthetic pose frames for peak clustering, threshold behavior, missing landmarks, and duplicate suppression.
+
+### Slice 6: Review Queue
+
+Purpose: turn suggestions, coverage gaps, and identity uncertainty into an actionable worklist while keeping the queue out of the source-of-truth path.
+
+Scope:
+
+- `pickleball_ai/queue.py`: materialize review tasks from hit candidates, low identity confidence, coverage gaps, and stale suggestions.
+- Queue statuses: `open`, `accepted`, `corrected`, `dismissed`, and `stale`.
+- Output: `state/review_queue.jsonl`.
+- Queue rebuilds must be idempotent and able to mark stale tasks when upstream artifacts change.
+- Tests for rebuild idempotency, stale handling, task priority, and the rule that annotations/coverage remain source of truth.
+
+### Slice 7: Metrics and Project Summary
+
+Purpose: make project quality visible before scaling annotation volume or training models.
+
+Scope:
+
+- `pickleball_ai/metrics.py`: reviewed duration, skipped duration, unreviewed duration, annotations per reviewed minute, identity correction counts, and action correction counts.
+- `pickleball_ai/summary.py`: project-level debug report that lists videos, jobs, artifacts, failures, queue counts, and coverage status.
+- Outputs:
+  - `state/metrics.json`
+  - `state/project_summary.json`
+- Tests for zero-denominator metrics, unavailable-vs-zero values, reviewed-only denominators, failed job summaries, and artifact counts.
+
+### Slice 8: Minimal Streamlit Annotation Workspace
+
+Purpose: add a usable local UI over the stable annotation engine without putting business logic inside Streamlit reruns.
+
+Scope:
+
+- `pickleball_ai/ui_streamlit.py` or a small `streamlit_app.py` entrypoint.
+- Three-pane workspace:
+  - video/player view
+  - queue and annotation inspector
+  - timeline and coverage map
+- Keyboard-first controls for accept, correct, dismiss, seek next/previous, and mark coverage.
+- UI reads and writes through annotation, coverage, identity, and queue modules only.
+- Heavy processing jobs must run outside the Streamlit render loop.
+- Tests should cover pure state helpers; UI behavior can be smoke-tested manually first.
+
+### Slice 9: Dataset Export and Model Iteration
+
+Purpose: turn corrected annotations into training data only after enough trusted labels exist.
+
+Scope:
+
+- Export readable timelines and structured training datasets.
+- Clip extraction around accepted annotations.
+- Model suggestion isolation: model outputs remain suggestions until accepted or corrected.
+- Reserve `source_tool` and `external_refs` for future CVAT interoperability, but keep the full CVAT converter deferred.
+- Add evaluation harnesses for candidate/event/model versions once annotation volume is meaningful.
+
 ## Approaches Considered
 
 ### Approach A: Annotation-First MVP
@@ -874,13 +1001,11 @@ uv run pytest
 
 ## Next Steps
 
-1. Add `pydantic` and `pytest` with `uv add` / dev dependency flow.
-2. Create `pickleball_ai/schema.py` with strict Pydantic models and enums.
-3. Create `pickleball_ai/storage.py` with data root resolution, safe paths, project layout creation, JSON/JSONL IO.
-4. Create `pickleball_ai/jobs.py` with job creation, status transitions, and job manifest creation.
-5. Add Slice 1 tests for schema, storage, job lifecycle, and malformed JSONL handling.
-6. Run `uv run pytest`.
-7. After Slice 1 passes, start Slice 2: refactor `pose_detector.py` into `pickleball_ai/pose.py`.
+1. Start Slice 3: create `pickleball_ai/annotations.py` and `pickleball_ai/coverage.py`.
+2. Define annotation event schemas, coverage event schemas, and projection rules in `pickleball_ai/schema.py`.
+3. Write tests for annotation projection, coverage projection, invalid time windows, overlap handling, and unreviewed-time semantics.
+4. Run `uv run pytest`.
+5. After Slice 3 passes, start Slice 4: player definitions and identity sessions.
 
 ## NOT in Scope
 
@@ -917,13 +1042,14 @@ THIS PLAN
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | CLEAR WITH ACCEPTED SCOPE | 5 expansion candidates reviewed; 4 accepted into MVP, CVAT converter deferred |
+| Autoplan | `/autoplan` | Roadmap completion | 1 | TARGETED DOC UPDATE | Later slices added from current architecture and completed implementation state |
 | Codex Review | `/codex review` | Independent 2nd opinion | 0 | NOT RUN | Not requested |
 | Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR WITH SCOPE REDUCTION | Slice 1 narrowed to schema + storage + jobs + tests |
 | Design Review | `/plan-design-review` | UI/UX gaps | 0 | NOT RUN | Recommended because MVP has annotation UI scope |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | NOT RUN | Not required yet |
 
 - UNRESOLVED: internal label language, minimum labeled clips before classifier, acceptable manual correction time.
-- VERDICT: CEO + ENG REVIEW COMPLETE FOR SLICE 1. Ready to implement Slice 1.
+- VERDICT: Slice 1 and Slice 2 are implemented. The next implementation target is Slice 3: annotation and coverage core.
 
 ## What I Noticed
 
