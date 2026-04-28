@@ -2,6 +2,7 @@
 tasks/
 videos/
 outputs/
+datasets/
 
 # Python-generated files
 __pycache__/

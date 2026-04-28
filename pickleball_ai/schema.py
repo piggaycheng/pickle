@@ -61,6 +61,22 @@ class TimingConfidence(StrEnum):
     UNKNOWN = "unknown"
 
 
+class Landmark(StrictModel):
+    x: float
+    y: float
+    z: float | None = None
+    visibility: float | None = Field(default=None, ge=0, le=1)
+    presence: float | None = Field(default=None, ge=0, le=1)
+
+
+class PoseFrame(StrictModel):
+    frame_index: int = Field(ge=0)
+    timestamp_ms: int = Field(ge=0)
+    image_width: int = Field(gt=0)
+    image_height: int = Field(gt=0)
+    poses: list[list[Landmark]] = Field(default_factory=list)
+
+
 class Project(StrictModel):
     project_id: str = Field(default_factory=new_id)
     schema_version: Literal["0.1.0"] = SCHEMA_VERSION
@@ -173,4 +189,3 @@ class JobManifest(StrictModel):
     @classmethod
     def validate_artifact_ref(cls, value: str) -> str:
         return _validate_relative_ref(value)
-
