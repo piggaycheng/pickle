@@ -7,5 +7,14 @@ requires-python = ">=3.11"
 dependencies = [
     "mediapipe>=0.10.33",
     "opencv-python>=4.13.0.92",
+    "pydantic",
     "yt-dlp>=2026.3.17",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
