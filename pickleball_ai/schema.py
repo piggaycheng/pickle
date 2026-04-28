@@ -61,6 +61,22 @@ class TimingConfidence(StrEnum):
     UNKNOWN = "unknown"
 
 
+class AnnotationEventType(StrEnum):
+    CREATED = "created"
+    UPDATED = "updated"
+    DELETED = "deleted"
+    ACCEPTED_SUGGESTION = "accepted_suggestion"
+    CORRECTED_SUGGESTION = "corrected_suggestion"
+
+
+class CoverageState(StrEnum):
+    UNREVIEWED = "unreviewed"
+    REVIEWED = "reviewed"
+    SKIPPED_NON_GAME = "skipped_non_game"
+    IGNORED_BAD_VIDEO = "ignored_bad_video"
+    NEEDS_RECHECK = "needs_recheck"
+
+
 class Landmark(StrictModel):
     x: float
     y: float
@@ -146,6 +162,63 @@ class Annotation(StrictModel):
     def validate_clip_range(self) -> "Annotation":
         if self.clip_end_ms <= self.clip_start_ms:
             raise ValueError("clip_end_ms must be greater than clip_start_ms")
+        return self
+
+
+class AnnotationEvent(StrictModel):
+    event_id: str = Field(default_factory=new_id)
+    annotation_id: str
+    event_type: AnnotationEventType
+    before: dict[str, Any] | None = None
+    after: dict[str, Any] | None = None
+    reason: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> "AnnotationEvent":
+        if self.event_type == AnnotationEventType.CREATED and self.after is None:
+            raise ValueError("created annotation events require after")
+        if self.event_type == AnnotationEventType.DELETED and self.before is None:
+            raise ValueError("deleted annotation events require before")
+        if self.after is not None:
+            after_id = self.after.get("annotation_id")
+            if after_id is not None and after_id != self.annotation_id:
+                raise ValueError("after annotation_id must match event annotation_id")
+        if self.before is not None:
+            before_id = self.before.get("annotation_id")
+            if before_id is not None and before_id != self.annotation_id:
+                raise ValueError("before annotation_id must match event annotation_id")
+        return self
+
+
+class CoverageEvent(StrictModel):
+    coverage_event_id: str = Field(default_factory=new_id)
+    segment_id: str | None = None
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    state: CoverageState
+    reason: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "CoverageEvent":
+        if self.end_ms <= self.start_ms:
+            raise ValueError("end_ms must be greater than start_ms")
+        return self
+
+
+class CoverageSpan(StrictModel):
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    state: CoverageState
+    source_event_id: str
+    segment_id: str | None = None
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "CoverageSpan":
+        if self.end_ms <= self.start_ms:
+            raise ValueError("end_ms must be greater than start_ms")
         return self
 
 

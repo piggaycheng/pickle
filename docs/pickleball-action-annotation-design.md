@@ -211,7 +211,7 @@ Scope:
 
 ### Slice 3: Annotation and Coverage Core
 
-Status: NEXT.
+Status: DONE.
 
 Purpose: create the source of truth for human labels and reviewed/unreviewed video coverage before building queue or UI features.
 
@@ -223,6 +223,7 @@ Scope:
 - Outputs:
   - `state/annotation_events.jsonl`
   - `state/annotations.jsonl`
+  - `state/coverage_events.jsonl`
   - `state/coverage.jsonl`
 - Tests for event projection, invalid time windows, overlap handling, latest-state wins, and the rule that unreviewed time is not treated as negative training data.
 
@@ -1001,11 +1002,11 @@ uv run pytest
 
 ## Next Steps
 
-1. Start Slice 3: create `pickleball_ai/annotations.py` and `pickleball_ai/coverage.py`.
-2. Define annotation event schemas, coverage event schemas, and projection rules in `pickleball_ai/schema.py`.
-3. Write tests for annotation projection, coverage projection, invalid time windows, overlap handling, and unreviewed-time semantics.
+1. Start Slice 4: create `pickleball_ai/players.py` and `pickleball_ai/identity.py`.
+2. Define player, track, and identity-session schemas in `pickleball_ai/schema.py`.
+3. Write tests for overlapping identity sessions, cut/replay invalidation, missing identity, and annotation references to players.
 4. Run `uv run pytest`.
-5. After Slice 3 passes, start Slice 4: player definitions and identity sessions.
+5. After Slice 4 passes, start Slice 5: hit candidate generation.
 
 ## NOT in Scope
 
@@ -1049,7 +1050,7 @@ THIS PLAN
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | NOT RUN | Not required yet |
 
 - UNRESOLVED: internal label language, minimum labeled clips before classifier, acceptable manual correction time.
-- VERDICT: Slice 1 and Slice 2 are implemented. The next implementation target is Slice 3: annotation and coverage core.
+- VERDICT: Slice 1, Slice 2, and Slice 3 are implemented. The next implementation target is Slice 4: player and identity session core.
 
 ## What I Noticed
 

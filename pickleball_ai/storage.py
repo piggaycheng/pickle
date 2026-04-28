@@ -134,6 +134,18 @@ def append_jsonl(path: Path, model: BaseModel) -> None:
         handle.flush()
 
 
+def write_jsonl(path: Path, models: list[BaseModel]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    with tmp_path.open("w", encoding="utf-8", newline="\n") as handle:
+        for model in models:
+            handle.write(model.model_dump_json())
+            handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    tmp_path.replace(path)
+
+
 def read_jsonl(path: Path, model_cls: type[T]) -> list[T]:
     if not path.exists() or path.stat().st_size == 0:
         return []
@@ -160,4 +172,3 @@ def write_job_manifest(paths: ProjectPaths, job: ProcessingJob) -> JobManifest:
     )
     write_json(paths.job_manifest(job.job_id), manifest)
     return manifest
-
