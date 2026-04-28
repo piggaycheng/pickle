@@ -229,6 +229,8 @@ Scope:
 
 ### Slice 4: Player and Identity Session Core
 
+Status: DONE.
+
 Purpose: separate visual tracks from player identity so YouTube cuts, replays, and camera changes can be corrected without corrupting labels.
 
 Scope:
@@ -1002,11 +1004,11 @@ uv run pytest
 
 ## Next Steps
 
-1. Start Slice 4: create `pickleball_ai/players.py` and `pickleball_ai/identity.py`.
-2. Define player, track, and identity-session schemas in `pickleball_ai/schema.py`.
-3. Write tests for overlapping identity sessions, cut/replay invalidation, missing identity, and annotation references to players.
+1. Start Slice 5: create `pickleball_ai/events.py`.
+2. Define hit-candidate schemas in `pickleball_ai/schema.py`.
+3. Write tests using synthetic pose frames for peak clustering, threshold behavior, missing landmarks, and duplicate suppression.
 4. Run `uv run pytest`.
-5. After Slice 4 passes, start Slice 5: hit candidate generation.
+5. After Slice 5 passes, start Slice 6: review queue.
 
 ## NOT in Scope
 
@@ -1050,7 +1052,7 @@ THIS PLAN
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | NOT RUN | Not required yet |
 
 - UNRESOLVED: internal label language, minimum labeled clips before classifier, acceptable manual correction time.
-- VERDICT: Slice 1, Slice 2, and Slice 3 are implemented. The next implementation target is Slice 4: player and identity session core.
+- VERDICT: Slice 1 through Slice 4 are implemented. The next implementation target is Slice 5: hit candidate generation.
 
 ## What I Noticed
 

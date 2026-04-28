@@ -77,6 +77,23 @@ class CoverageState(StrEnum):
     NEEDS_RECHECK = "needs_recheck"
 
 
+class CourtSide(StrEnum):
+    NEAR = "near"
+    FAR = "far"
+    UNKNOWN = "unknown"
+
+
+class TeamSide(StrEnum):
+    LEFT = "left"
+    RIGHT = "right"
+    UNKNOWN = "unknown"
+
+
+class IdentityConfirmedBy(StrEnum):
+    USER = "user"
+    MODEL = "model"
+
+
 class Landmark(StrictModel):
     x: float
     y: float
@@ -120,6 +137,59 @@ class Video(StrictModel):
     def validate_source(self) -> "Video":
         if self.source_type == SourceType.YOUTUBE and self.source_url is None:
             raise ValueError("youtube videos require source_url")
+        return self
+
+
+class Player(StrictModel):
+    player_id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    side: CourtSide = CourtSide.UNKNOWN
+    team: TeamSide = TeamSide.UNKNOWN
+    identity_notes: str | None = None
+
+
+class PlayerRoster(StrictModel):
+    players: list[Player] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_players(self) -> "PlayerRoster":
+        ids = [player.player_id for player in self.players]
+        if len(ids) != len(set(ids)):
+            raise ValueError("player ids must be unique")
+        return self
+
+
+class Track(StrictModel):
+    track_id: str = Field(min_length=1)
+    segment_id: str | None = None
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    source_job_id: str | None = None
+    confidence: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "Track":
+        if self.end_ms <= self.start_ms:
+            raise ValueError("end_ms must be greater than start_ms")
+        return self
+
+
+class IdentitySession(StrictModel):
+    identity_session_id: str = Field(default_factory=new_id)
+    player_id: str = Field(min_length=1)
+    track_id: str = Field(min_length=1)
+    segment_id: str | None = None
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    confidence: float = Field(ge=0, le=1)
+    confirmed_by: IdentityConfirmedBy
+    invalidated_by_cut: bool = False
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "IdentitySession":
+        if self.end_ms <= self.start_ms:
+            raise ValueError("end_ms must be greater than start_ms")
         return self
 
 
