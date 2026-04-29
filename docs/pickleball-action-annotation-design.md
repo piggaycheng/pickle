@@ -245,6 +245,8 @@ Scope:
 
 ### Slice 5: Hit Candidate Generation
 
+Status: DONE.
+
 Purpose: generate reviewable hit-event candidates from pose data without pretending they are final labels.
 
 Scope:
@@ -1004,11 +1006,11 @@ uv run pytest
 
 ## Next Steps
 
-1. Start Slice 5: create `pickleball_ai/events.py`.
-2. Define hit-candidate schemas in `pickleball_ai/schema.py`.
-3. Write tests using synthetic pose frames for peak clustering, threshold behavior, missing landmarks, and duplicate suppression.
+1. Start Slice 6: create `pickleball_ai/queue.py`.
+2. Define review queue item schemas in `pickleball_ai/schema.py`.
+3. Write tests for queue rebuild idempotency, stale handling, task priority, and keeping annotations/coverage as source of truth.
 4. Run `uv run pytest`.
-5. After Slice 5 passes, start Slice 6: review queue.
+5. After Slice 6 passes, start Slice 7: metrics and project summary.
 
 ## NOT in Scope
 
@@ -1052,7 +1054,7 @@ THIS PLAN
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | NOT RUN | Not required yet |
 
 - UNRESOLVED: internal label language, minimum labeled clips before classifier, acceptable manual correction time.
-- VERDICT: Slice 1 through Slice 4 are implemented. The next implementation target is Slice 5: hit candidate generation.
+- VERDICT: Slice 1 through Slice 5 are implemented. The next implementation target is Slice 6: review queue.
 
 ## What I Noticed
 

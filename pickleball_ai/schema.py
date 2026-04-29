@@ -193,6 +193,26 @@ class IdentitySession(StrictModel):
         return self
 
 
+class HitCandidate(StrictModel):
+    candidate_id: str = Field(default_factory=new_id)
+    video_id: str
+    timestamp_ms: int = Field(ge=0)
+    time_window: "TimeWindow"
+    confidence: float = Field(ge=0, le=1)
+    source: str = "pose_motion_heuristic"
+    source_job_id: str | None = None
+    source_pose_ref: str | None = None
+    pose_frame_index: int = Field(ge=0)
+    features: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("source_pose_ref")
+    @classmethod
+    def validate_source_pose_ref(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_relative_ref(value)
+
+
 class TimeWindow(StrictModel):
     start_ms: int = Field(ge=0)
     end_ms: int = Field(ge=0)
