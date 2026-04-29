@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Literal
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
@@ -92,6 +92,25 @@ class TeamSide(StrEnum):
 class IdentityConfirmedBy(StrEnum):
     USER = "user"
     MODEL = "model"
+
+
+class QueueReason(StrEnum):
+    HIT_CANDIDATE = "hit_candidate"
+    LOW_IDENTITY_CONFIDENCE = "low_identity_confidence"
+    COVERAGE_GAP = "coverage_gap"
+    STALE_ITEM = "stale_item"
+
+
+class QueueStatus(StrEnum):
+    OPEN = "open"
+    ACCEPTED = "accepted"
+    CORRECTED = "corrected"
+    DISMISSED = "dismissed"
+    STALE = "stale"
+
+
+def stable_id(namespace: str, value: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"{namespace}:{value}"))
 
 
 class Landmark(StrictModel):
@@ -310,6 +329,22 @@ class CoverageSpan(StrictModel):
         if self.end_ms <= self.start_ms:
             raise ValueError("end_ms must be greater than start_ms")
         return self
+
+
+class TargetRef(StrictModel):
+    type: str = Field(min_length=1)
+    id: str = Field(min_length=1)
+
+
+class ReviewQueueItem(StrictModel):
+    queue_item_id: str = Field(default_factory=new_id)
+    reason: QueueReason
+    target_ref: TargetRef
+    status: QueueStatus = QueueStatus.OPEN
+    priority: int = Field(default=0, ge=0)
+    created_from_job_id: str | None = None
+    stale_reason: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class ProcessingJob(StrictModel):

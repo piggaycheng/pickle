@@ -259,6 +259,8 @@ Scope:
 
 ### Slice 6: Review Queue
 
+Status: DONE.
+
 Purpose: turn suggestions, coverage gaps, and identity uncertainty into an actionable worklist while keeping the queue out of the source-of-truth path.
 
 Scope:
@@ -1006,11 +1008,11 @@ uv run pytest
 
 ## Next Steps
 
-1. Start Slice 6: create `pickleball_ai/queue.py`.
-2. Define review queue item schemas in `pickleball_ai/schema.py`.
-3. Write tests for queue rebuild idempotency, stale handling, task priority, and keeping annotations/coverage as source of truth.
+1. Start Slice 7: create `pickleball_ai/metrics.py` and `pickleball_ai/summary.py`.
+2. Define metrics and project-summary schemas in `pickleball_ai/schema.py`.
+3. Write tests for zero-denominator metrics, unavailable-vs-zero values, reviewed-only denominators, failed job summaries, and artifact counts.
 4. Run `uv run pytest`.
-5. After Slice 6 passes, start Slice 7: metrics and project summary.
+5. After Slice 7 passes, start Slice 8: minimal Streamlit annotation workspace.
 
 ## NOT in Scope
 
@@ -1054,7 +1056,7 @@ THIS PLAN
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | NOT RUN | Not required yet |
 
 - UNRESOLVED: internal label language, minimum labeled clips before classifier, acceptable manual correction time.
-- VERDICT: Slice 1 through Slice 5 are implemented. The next implementation target is Slice 6: review queue.
+- VERDICT: Slice 1 through Slice 6 are implemented. The next implementation target is Slice 7: metrics and project summary.
 
 ## What I Noticed
 
