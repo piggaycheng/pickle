@@ -10,6 +10,7 @@ from .annotations import (
     rebuild_annotations,
 )
 from .coverage import append_coverage_event, load_coverage, rebuild_coverage
+from .exports import export_dataset
 from .metrics import compute_metrics, rebuild_metrics
 from .players import default_players, load_players, players_path, write_players
 from .queue import load_review_queue
@@ -210,19 +211,22 @@ def run() -> None:
             coverage_state = st.selectbox("Coverage", [item.value for item in CoverageState])
             coverage_submitted = st.form_submit_button("Mark")
         if coverage_submitted:
-            mark_coverage(
-                state.paths,
-                start_ms=int(start_ms),
-                end_ms=int(end_ms),
-                state=CoverageState(coverage_state),
-            )
-            rebuild_metrics(
-                state.paths,
-                annotations=load_annotations(state.paths),
-                coverage=load_coverage(state.paths),
-            )
-            rebuild_project_summary(state.paths)
-            st.rerun()
+            if int(end_ms) <= int(start_ms):
+                st.error("End must be greater than Start.")
+            else:
+                mark_coverage(
+                    state.paths,
+                    start_ms=int(start_ms),
+                    end_ms=int(end_ms),
+                    state=CoverageState(coverage_state),
+                )
+                rebuild_metrics(
+                    state.paths,
+                    annotations=load_annotations(state.paths),
+                    coverage=load_coverage(state.paths),
+                )
+                rebuild_project_summary(state.paths)
+                st.rerun()
 
     st.subheader("Timeline")
     st.dataframe(annotation_rows(state.annotations), use_container_width=True, hide_index=True)
@@ -245,8 +249,13 @@ def run() -> None:
         st.metric("Jobs", summary.job_count)
         st.metric("Failed jobs", len(summary.failed_jobs))
         st.metric("Artifacts", summary.artifact_count)
+        if st.button("Export Dataset"):
+            manifest = export_dataset(state.paths)
+            st.success(
+                f"Exported {manifest.training_example_count} training examples to "
+                f"{manifest.training_examples_ref}."
+            )
 
 
 if __name__ == "__main__":
     run()
-
