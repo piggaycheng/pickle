@@ -288,6 +288,8 @@ Scope:
 
 ### Slice 8: Minimal Streamlit Annotation Workspace
 
+Status: DONE.
+
 Purpose: add a usable local UI over the stable annotation engine without putting business logic inside Streamlit reruns.
 
 Scope:
@@ -1010,11 +1012,11 @@ uv run pytest
 
 ## Next Steps
 
-1. Start Slice 8: create a minimal Streamlit annotation workspace entrypoint.
-2. Keep Streamlit as a UI layer over existing annotation, coverage, identity, queue, metrics, and summary modules.
-3. Add pure helper tests where possible; manually smoke-test the UI once dependencies are installed.
+1. Start Slice 9: add dataset export and model-iteration utilities.
+2. Export readable timelines and structured training datasets from accepted annotations.
+3. Keep model suggestions isolated until accepted or corrected.
 4. Run `uv run pytest`.
-5. After Slice 8 passes, start Slice 9: dataset export and model iteration.
+5. After Slice 9 passes, run an end-to-end smoke test on the short local clip.
 
 ## NOT in Scope
 
@@ -1058,7 +1060,7 @@ THIS PLAN
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | NOT RUN | Not required yet |
 
 - UNRESOLVED: internal label language, minimum labeled clips before classifier, acceptable manual correction time.
-- VERDICT: Slice 1 through Slice 7 are implemented. The next implementation target is Slice 8: minimal Streamlit annotation workspace.
+- VERDICT: Slice 1 through Slice 8 are implemented. The next implementation target is Slice 9: dataset export and model iteration.
 
 ## What I Noticed
 
