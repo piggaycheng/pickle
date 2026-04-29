@@ -8,6 +8,7 @@ dependencies = [
     "mediapipe>=0.10.33",
     "opencv-python>=4.13.0.92",
     "pydantic",
+    "streamlit>=1.57.0",
     "yt-dlp>=2026.3.17",
 ]
 
