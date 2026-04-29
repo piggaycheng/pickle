@@ -306,6 +306,8 @@ Scope:
 
 ### Slice 9: Dataset Export and Model Iteration
 
+Status: DONE.
+
 Purpose: turn corrected annotations into training data only after enough trusted labels exist.
 
 Scope:
@@ -1012,11 +1014,11 @@ uv run pytest
 
 ## Next Steps
 
-1. Start Slice 9: add dataset export and model-iteration utilities.
-2. Export readable timelines and structured training datasets from accepted annotations.
-3. Keep model suggestions isolated until accepted or corrected.
+1. Run end-to-end QA on the local Streamlit workflow with `datasets/smoke-pose-001`.
+2. Verify manual annotation, coverage marking, queue display, metrics, summary, and export files from the UI.
+3. Decide whether the next milestone should be UI polish, real clip extraction with ffmpeg, or model suggestion quality.
 4. Run `uv run pytest`.
-5. After Slice 9 passes, run an end-to-end smoke test on the short local clip.
+5. Capture any workflow gaps before moving beyond the MVP slices.
 
 ## NOT in Scope
 
@@ -1060,7 +1062,7 @@ THIS PLAN
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | NOT RUN | Not required yet |
 
 - UNRESOLVED: internal label language, minimum labeled clips before classifier, acceptable manual correction time.
-- VERDICT: Slice 1 through Slice 8 are implemented. The next implementation target is Slice 9: dataset export and model iteration.
+- VERDICT: Slice 1 through Slice 9 are implemented. The next target is end-to-end QA and workflow polish.
 
 ## What I Noticed
 

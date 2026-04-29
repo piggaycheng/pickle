@@ -336,6 +336,17 @@ class TargetRef(StrictModel):
     id: str = Field(min_length=1)
 
 
+class ModelSuggestion(StrictModel):
+    suggestion_id: str = Field(default_factory=new_id)
+    job_id: str
+    target_ref: TargetRef
+    player_id: str | None = None
+    action: str | None = None
+    confidence: float = Field(ge=0, le=1)
+    features: dict[str, float] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class ReviewQueueItem(StrictModel):
     queue_item_id: str = Field(default_factory=new_id)
     reason: QueueReason
@@ -391,6 +402,58 @@ class ProjectSummary(StrictModel):
     queue_counts: QueueStatusCounts
     coverage: CoverageStatusSummary
     generated_at: datetime = Field(default_factory=utc_now)
+
+
+class TimelineExportRow(StrictModel):
+    annotation_id: str
+    video_id: str
+    timestamp_ms: int = Field(ge=0)
+    player_id: str
+    action: str
+    timing_confidence: TimingConfidence
+    clip_start_ms: int = Field(ge=0)
+    clip_end_ms: int = Field(ge=0)
+    source: str
+
+
+class TrainingExample(StrictModel):
+    example_id: str
+    annotation_id: str
+    video_id: str
+    video_ref: str
+    player_id: str
+    action: str
+    event_time_ms: int = Field(ge=0)
+    clip_start_ms: int = Field(ge=0)
+    clip_end_ms: int = Field(ge=0)
+    timing_confidence: TimingConfidence
+    bbox: tuple[int, int, int, int] | None = None
+    pose_landmarks_ref: str | None = None
+    source_tool: str
+    external_refs: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("video_ref", "pose_landmarks_ref")
+    @classmethod
+    def validate_refs(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_relative_ref(value)
+
+
+class ExportManifest(StrictModel):
+    export_id: str = Field(default_factory=new_id)
+    project_id: str
+    video_id: str
+    timeline_ref: str
+    training_examples_ref: str
+    annotation_count: int = Field(ge=0)
+    training_example_count: int = Field(ge=0)
+    generated_at: datetime = Field(default_factory=utc_now)
+
+    @field_validator("timeline_ref", "training_examples_ref")
+    @classmethod
+    def validate_export_refs(cls, value: str) -> str:
+        return _validate_relative_ref(value)
 
 
 class ProcessingJob(StrictModel):
