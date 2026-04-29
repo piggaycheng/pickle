@@ -347,6 +347,52 @@ class ReviewQueueItem(StrictModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class ProjectMetrics(StrictModel):
+    reviewed_duration_ms: int = Field(ge=0)
+    skipped_non_game_duration_ms: int = Field(ge=0)
+    unreviewed_duration_ms: int = Field(ge=0)
+    annotation_count: int = Field(ge=0)
+    annotations_per_reviewed_minute: float | None = None
+    identity_corrections_count: int = Field(ge=0)
+    action_corrections_by_label: dict[str, int] = Field(default_factory=dict)
+    generated_at: datetime = Field(default_factory=utc_now)
+
+
+class QueueStatusCounts(StrictModel):
+    open: int = Field(ge=0)
+    accepted: int = Field(ge=0)
+    corrected: int = Field(ge=0)
+    dismissed: int = Field(ge=0)
+    stale: int = Field(ge=0)
+
+
+class CoverageStatusSummary(StrictModel):
+    reviewed_duration_ms: int = Field(ge=0)
+    skipped_non_game_duration_ms: int = Field(ge=0)
+    unreviewed_duration_ms: int = Field(ge=0)
+    needs_recheck_duration_ms: int = Field(ge=0)
+
+
+class JobFailureSummary(StrictModel):
+    job_id: str
+    job_type: JobType
+    error_type: str | None = None
+    error_message: str | None = None
+    user_action: str | None = None
+
+
+class ProjectSummary(StrictModel):
+    project_id: str
+    video_id: str | None = None
+    video_title: str | None = None
+    job_count: int = Field(ge=0)
+    failed_jobs: list[JobFailureSummary] = Field(default_factory=list)
+    artifact_count: int = Field(ge=0)
+    queue_counts: QueueStatusCounts
+    coverage: CoverageStatusSummary
+    generated_at: datetime = Field(default_factory=utc_now)
+
+
 class ProcessingJob(StrictModel):
     job_id: str = Field(default_factory=new_id)
     video_id: str

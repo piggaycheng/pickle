@@ -273,6 +273,8 @@ Scope:
 
 ### Slice 7: Metrics and Project Summary
 
+Status: DONE.
+
 Purpose: make project quality visible before scaling annotation volume or training models.
 
 Scope:
@@ -1008,11 +1010,11 @@ uv run pytest
 
 ## Next Steps
 
-1. Start Slice 7: create `pickleball_ai/metrics.py` and `pickleball_ai/summary.py`.
-2. Define metrics and project-summary schemas in `pickleball_ai/schema.py`.
-3. Write tests for zero-denominator metrics, unavailable-vs-zero values, reviewed-only denominators, failed job summaries, and artifact counts.
+1. Start Slice 8: create a minimal Streamlit annotation workspace entrypoint.
+2. Keep Streamlit as a UI layer over existing annotation, coverage, identity, queue, metrics, and summary modules.
+3. Add pure helper tests where possible; manually smoke-test the UI once dependencies are installed.
 4. Run `uv run pytest`.
-5. After Slice 7 passes, start Slice 8: minimal Streamlit annotation workspace.
+5. After Slice 8 passes, start Slice 9: dataset export and model iteration.
 
 ## NOT in Scope
 
@@ -1056,7 +1058,7 @@ THIS PLAN
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | NOT RUN | Not required yet |
 
 - UNRESOLVED: internal label language, minimum labeled clips before classifier, acceptable manual correction time.
-- VERDICT: Slice 1 through Slice 6 are implemented. The next implementation target is Slice 7: metrics and project summary.
+- VERDICT: Slice 1 through Slice 7 are implemented. The next implementation target is Slice 8: minimal Streamlit annotation workspace.
 
 ## What I Noticed
 
