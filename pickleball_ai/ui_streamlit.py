@@ -6,6 +6,7 @@ from pathlib import Path
 from .annotations import (
     append_annotation_event,
     create_annotation_event,
+    delete_annotation_event,
     load_annotations,
     rebuild_annotations,
 )
@@ -91,6 +92,7 @@ def queue_rows(queue_items: list[ReviewQueueItem]) -> list[dict[str, object]]:
 def annotation_rows(annotations: list[Annotation]) -> list[dict[str, object]]:
     return [
         {
+            "annotation_id": annotation.annotation_id,
             "time_ms": annotation.event_time_ms,
             "player": annotation.player_id,
             "action": annotation.action,
@@ -100,6 +102,13 @@ def annotation_rows(annotations: list[Annotation]) -> list[dict[str, object]]:
         }
         for annotation in sorted(annotations, key=lambda item: (item.event_time_ms, item.annotation_id))
     ]
+
+
+def annotation_option(annotation: Annotation) -> str:
+    return (
+        f"{annotation.event_time_ms}ms | {annotation.player_id} | "
+        f"{annotation.action} | {annotation.annotation_id}"
+    )
 
 
 def coverage_rows(coverage: list[CoverageSpan]) -> list[dict[str, object]]:
@@ -138,6 +147,22 @@ def add_manual_annotation(
         clip_end_ms=end_ms,
     )
     append_annotation_event(paths, create_annotation_event(annotation, reason="streamlit_manual_entry"))
+    rebuild_annotations(paths)
+    return annotation
+
+
+def delete_annotation(paths: ProjectPaths, annotation_id: str) -> Annotation:
+    annotations = load_annotations(paths)
+    annotation = next(
+        (item for item in annotations if item.annotation_id == annotation_id),
+        None,
+    )
+    if annotation is None:
+        raise ValueError(f"annotation not found: {annotation_id}")
+    append_annotation_event(
+        paths,
+        delete_annotation_event(annotation, reason="streamlit_delete_annotation"),
+    )
     rebuild_annotations(paths)
     return annotation
 
@@ -220,6 +245,28 @@ def run() -> None:
                     end_ms=int(end_ms),
                     state=CoverageState(coverage_state),
                 )
+                rebuild_metrics(
+                    state.paths,
+                    annotations=load_annotations(state.paths),
+                    coverage=load_coverage(state.paths),
+                )
+                rebuild_project_summary(state.paths)
+                st.rerun()
+
+        if state.annotations:
+            with st.form("delete_annotation"):
+                sorted_annotations = sorted(
+                    state.annotations,
+                    key=lambda item: (item.event_time_ms, item.annotation_id),
+                )
+                delete_options = {
+                    annotation_option(annotation): annotation.annotation_id
+                    for annotation in sorted_annotations
+                }
+                selected_annotation = st.selectbox("Delete annotation", list(delete_options))
+                delete_submitted = st.form_submit_button("Delete")
+            if delete_submitted:
+                delete_annotation(state.paths, delete_options[selected_annotation])
                 rebuild_metrics(
                     state.paths,
                     annotations=load_annotations(state.paths),

@@ -13,8 +13,10 @@ from pickleball_ai.schema import (
 from pickleball_ai.storage import create_project_layout
 from pickleball_ai.ui_streamlit import (
     add_manual_annotation,
+    annotation_option,
     annotation_rows,
     coverage_rows,
+    delete_annotation,
     discover_projects,
     load_workspace,
     mark_coverage,
@@ -87,7 +89,37 @@ def test_add_manual_annotation_writes_event_and_materialized_annotation(tmp_path
 
     annotations = load_annotations(paths)
     assert annotations == [annotation]
+    assert annotation_rows(annotations)[0]["annotation_id"] == annotation.annotation_id
     assert annotation_rows(annotations)[0]["window"] == "800-1200"
+
+
+def test_delete_annotation_writes_deleted_event_and_removes_materialized_annotation(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    annotation = add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1000,
+        player_id="A",
+        action="drive",
+    )
+
+    deleted = delete_annotation(paths, annotation.annotation_id)
+
+    assert deleted == annotation
+    assert load_annotations(paths) == []
+
+
+def test_annotation_option_includes_human_context_and_id(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    annotation = add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1000,
+        player_id="A",
+        action="drive",
+    )
+
+    assert annotation_option(annotation) == f"1000ms | A | drive | {annotation.annotation_id}"
 
 
 def test_mark_coverage_writes_event_and_materialized_coverage(tmp_path):
