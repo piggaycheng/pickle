@@ -2,6 +2,7 @@ from pickleball_ai.annotations import load_annotations
 from pickleball_ai.coverage import load_coverage
 from pickleball_ai.schema import (
     CoverageState,
+    HitCandidate,
     Project,
     QueueReason,
     QueueStatus,
@@ -10,18 +11,25 @@ from pickleball_ai.schema import (
     TargetRef,
     Video,
 )
-from pickleball_ai.storage import create_project_layout
+from pickleball_ai.storage import create_project_layout, write_jsonl
 from pickleball_ai.ui_streamlit import (
+    add_annotation_from_queue,
     add_manual_annotation,
     annotation_option,
     annotation_rows,
     coverage_rows,
     delete_annotation,
     discover_projects,
+    find_duplicate_annotations,
+    load_hit_candidate_for_queue_item,
     load_workspace,
     mark_coverage,
+    queue_item_defaults,
     queue_rows,
+    update_queue_item_status,
 )
+from pickleball_ai.events import hit_candidates_path
+from pickleball_ai.queue import load_review_queue, write_review_queue
 
 
 def test_discover_projects_lists_project_directories(tmp_path):
@@ -91,6 +99,116 @@ def test_add_manual_annotation_writes_event_and_materialized_annotation(tmp_path
     assert annotations == [annotation]
     assert annotation_rows(annotations)[0]["annotation_id"] == annotation.annotation_id
     assert annotation_rows(annotations)[0]["window"] == "800-1200"
+
+
+def test_find_duplicate_annotations_matches_time_player_and_action(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    first = add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1000,
+        player_id="A",
+        action="drive",
+    )
+    add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1601,
+        player_id="A",
+        action="drive",
+    )
+    add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1000,
+        player_id="B",
+        action="drive",
+    )
+
+    duplicates = find_duplicate_annotations(
+        load_annotations(paths),
+        event_time_ms=1200,
+        player_id="A",
+        action="drive",
+    )
+
+    assert duplicates == [first]
+
+
+def test_queue_item_defaults_load_hit_candidate_time(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    candidate = HitCandidate(
+        candidate_id="candidate-1",
+        video_id="video-1",
+        timestamp_ms=1234,
+        time_window={"start_ms": 1000, "end_ms": 1500},
+        confidence=0.8,
+        source_job_id="job-1",
+        pose_frame_index=12,
+    )
+    write_jsonl(hit_candidates_path(paths, "job-1"), [candidate])
+    item = ReviewQueueItem(
+        reason=QueueReason.HIT_CANDIDATE,
+        target_ref=TargetRef(type="hit_candidate", id="candidate-1"),
+        status=QueueStatus.OPEN,
+        priority=100,
+        created_from_job_id="job-1",
+    )
+
+    assert load_hit_candidate_for_queue_item(paths, item) == candidate
+    assert queue_item_defaults(paths, item) == {
+        "event_time_ms": 1234,
+        "action": "unknown",
+    }
+
+
+def test_queue_item_defaults_parse_coverage_gap():
+    item = ReviewQueueItem(
+        reason=QueueReason.COVERAGE_GAP,
+        target_ref=TargetRef(type="coverage_span", id="1000-2000"),
+        status=QueueStatus.OPEN,
+        priority=60,
+    )
+
+    assert queue_item_defaults(None, item) == {
+        "coverage_start_ms": 1000,
+        "coverage_end_ms": 2000,
+    }
+
+
+def test_add_annotation_from_queue_accepts_queue_item(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    item = ReviewQueueItem(
+        queue_item_id="queue-1",
+        reason=QueueReason.HIT_CANDIDATE,
+        target_ref=TargetRef(type="hit_candidate", id="candidate-1"),
+        status=QueueStatus.OPEN,
+        priority=100,
+    )
+    write_review_queue(paths, [item])
+
+    annotation = add_annotation_from_queue(
+        paths,
+        video_id="video-1",
+        event_time_ms=1000,
+        player_id="A",
+        action="drive",
+        queue_item_id="queue-1",
+    )
+
+    assert load_annotations(paths) == [annotation]
+    assert load_review_queue(paths)[0].status == QueueStatus.ACCEPTED
+
+
+def test_update_queue_item_status_rejects_missing_item(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+
+    try:
+        update_queue_item_status(paths, "missing", QueueStatus.ACCEPTED)
+    except ValueError as exc:
+        assert "queue item not found" in str(exc)
+    else:
+        raise AssertionError("missing queue item should raise")
 
 
 def test_delete_annotation_writes_deleted_event_and_removes_materialized_annotation(tmp_path):
