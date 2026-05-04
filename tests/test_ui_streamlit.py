@@ -17,6 +17,7 @@ from pickleball_ai.ui_streamlit import (
     add_manual_annotation,
     annotation_option,
     annotation_rows,
+    clear_manual_annotation_form_state,
     correct_coverage,
     coverage_option,
     coverage_rows,
@@ -27,6 +28,7 @@ from pickleball_ai.ui_streamlit import (
     find_duplicate_annotations,
     load_hit_candidate_for_queue_item,
     load_workspace,
+    manual_annotation_form_key,
     mark_coverage,
     queue_item_defaults,
     queue_rows,
@@ -137,6 +139,23 @@ def test_find_duplicate_annotations_matches_time_player_and_action(tmp_path):
     )
 
     assert duplicates == [first]
+
+
+def test_clear_manual_annotation_form_state_removes_only_annotation_widgets():
+    state = {
+        manual_annotation_form_key("manual", "event_time_ms"): 1000,
+        manual_annotation_form_key("manual", "action"): "drive",
+        manual_annotation_form_key("queue-1", "allow_duplicate"): True,
+        "coverage_update:start_ms": 0,
+        "unrelated": "kept",
+    }
+
+    clear_manual_annotation_form_state(state)
+
+    assert state == {
+        "coverage_update:start_ms": 0,
+        "unrelated": "kept",
+    }
 
 
 def test_queue_item_defaults_load_hit_candidate_time(tmp_path):
