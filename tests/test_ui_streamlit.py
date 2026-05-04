@@ -17,9 +17,13 @@ from pickleball_ai.ui_streamlit import (
     add_manual_annotation,
     annotation_option,
     annotation_rows,
+    correct_coverage,
+    coverage_option,
     coverage_rows,
     delete_annotation,
+    delete_coverage,
     discover_projects,
+    export_precheck_warnings,
     find_duplicate_annotations,
     load_hit_candidate_for_queue_item,
     load_workspace,
@@ -259,6 +263,79 @@ def test_mark_coverage_writes_event_and_materialized_coverage(tmp_path):
             "state": "reviewed",
             "duration_ms": 1000,
         }
+    ]
+
+
+def test_correct_coverage_appends_replacement_for_selected_span(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    mark_coverage(paths, start_ms=0, end_ms=1000, state=CoverageState.REVIEWED)
+    span = load_coverage(paths)[0]
+
+    event = correct_coverage(paths, span, state=CoverageState.NEEDS_RECHECK)
+
+    coverage = load_coverage(paths)
+    assert coverage[0].state == CoverageState.NEEDS_RECHECK
+    assert coverage[0].source_event_id == event.coverage_event_id
+    assert coverage_option(coverage[0]) == (
+        f"0-1000ms | needs_recheck | {event.coverage_event_id}"
+    )
+
+
+def test_delete_coverage_clears_selected_span_to_unreviewed(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    mark_coverage(paths, start_ms=0, end_ms=1000, state=CoverageState.REVIEWED)
+    span = load_coverage(paths)[0]
+
+    event = delete_coverage(paths, span)
+
+    coverage = load_coverage(paths)
+    assert coverage[0].state == CoverageState.UNREVIEWED
+    assert coverage[0].reason == "streamlit_delete_coverage"
+    assert coverage[0].source_event_id == event.coverage_event_id
+
+
+def test_export_precheck_warns_about_dataset_quality_issues(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1000,
+        player_id="A",
+        action="drive",
+    )
+    add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1200,
+        player_id="A",
+        action="drive",
+    )
+    add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=2000,
+        player_id="B",
+        action="unknown",
+    )
+    mark_coverage(paths, start_ms=0, end_ms=1000, state=CoverageState.UNREVIEWED)
+    item = ReviewQueueItem(
+        reason=QueueReason.COVERAGE_GAP,
+        target_ref=TargetRef(type="coverage_span", id="0-1000"),
+        status=QueueStatus.OPEN,
+        priority=60,
+    )
+
+    warnings = export_precheck_warnings(
+        annotations=load_annotations(paths),
+        coverage=load_coverage(paths),
+        queue_items=[item],
+    )
+
+    assert warnings == [
+        "1 coverage gap(s), 1000ms unreviewed.",
+        "1 annotation(s) still use unknown action.",
+        "1 possible duplicate annotation pair(s) within 300ms.",
+        "1 unresolved review queue item(s).",
     ]
 
 

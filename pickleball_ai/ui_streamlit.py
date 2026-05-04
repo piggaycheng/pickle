@@ -118,6 +118,64 @@ def find_duplicate_annotations(
     ]
 
 
+def export_precheck_warnings(
+    *,
+    annotations: list[Annotation],
+    coverage: list[CoverageSpan],
+    queue_items: list[ReviewQueueItem],
+) -> list[str]:
+    trusted_annotations = [
+        annotation
+        for annotation in annotations
+        if annotation.source != "model_suggestion"
+    ]
+    warnings: list[str] = []
+
+    coverage_gaps = [span for span in coverage if span.state == CoverageState.UNREVIEWED]
+    if coverage_gaps:
+        gap_duration_ms = sum(span.end_ms - span.start_ms for span in coverage_gaps)
+        warnings.append(
+            f"{len(coverage_gaps)} coverage gap(s), {gap_duration_ms}ms unreviewed."
+        )
+
+    unknown_annotations = [
+        annotation
+        for annotation in trusted_annotations
+        if annotation.action == "unknown"
+    ]
+    if unknown_annotations:
+        warnings.append(f"{len(unknown_annotations)} annotation(s) still use unknown action.")
+
+    duplicate_pairs = _duplicate_annotation_pairs(trusted_annotations)
+    if duplicate_pairs:
+        warnings.append(
+            f"{len(duplicate_pairs)} possible duplicate annotation pair(s) within "
+            f"{DUPLICATE_TOLERANCE_MS}ms."
+        )
+
+    open_queue_items = [
+        item
+        for item in queue_items
+        if item.status == QueueStatus.OPEN
+    ]
+    if open_queue_items:
+        warnings.append(f"{len(open_queue_items)} unresolved review queue item(s).")
+
+    return warnings
+
+
+def _duplicate_annotation_pairs(annotations: list[Annotation]) -> list[tuple[Annotation, Annotation]]:
+    pairs: list[tuple[Annotation, Annotation]] = []
+    ordered = sorted(annotations, key=lambda item: (item.event_time_ms, item.annotation_id))
+    for index, left in enumerate(ordered):
+        for right in ordered[index + 1:]:
+            if right.event_time_ms - left.event_time_ms > DUPLICATE_TOLERANCE_MS:
+                break
+            if left.player_id == right.player_id and left.action == right.action:
+                pairs.append((left, right))
+    return pairs
+
+
 def load_hit_candidate_for_queue_item(paths: ProjectPaths, item: ReviewQueueItem) -> HitCandidate | None:
     if item.reason != QueueReason.HIT_CANDIDATE or item.target_ref.type != "hit_candidate":
         return None
@@ -205,6 +263,10 @@ def coverage_rows(coverage: list[CoverageSpan]) -> list[dict[str, object]]:
     ]
 
 
+def coverage_option(span: CoverageSpan) -> str:
+    return f"{span.start_ms}-{span.end_ms}ms | {span.state.value} | {span.source_event_id}"
+
+
 def add_manual_annotation(
     paths: ProjectPaths,
     *,
@@ -283,6 +345,31 @@ def mark_coverage(
     append_coverage_event(paths, event)
     rebuild_coverage(paths)
     return event
+
+
+def correct_coverage(
+    paths: ProjectPaths,
+    span: CoverageSpan,
+    *,
+    state: CoverageState,
+) -> CoverageEvent:
+    return mark_coverage(
+        paths,
+        start_ms=span.start_ms,
+        end_ms=span.end_ms,
+        state=state,
+        reason="streamlit_correct_coverage",
+    )
+
+
+def delete_coverage(paths: ProjectPaths, span: CoverageSpan) -> CoverageEvent:
+    return mark_coverage(
+        paths,
+        start_ms=span.start_ms,
+        end_ms=span.end_ms,
+        state=CoverageState.UNREVIEWED,
+        reason="streamlit_delete_coverage",
+    )
 
 
 def run() -> None:
@@ -409,6 +496,41 @@ def run() -> None:
                 rebuild_project_summary(state.paths)
                 st.rerun()
 
+        if state.coverage:
+            with st.form("coverage_correction"):
+                sorted_coverage = sorted(
+                    state.coverage,
+                    key=lambda item: (item.start_ms, item.end_ms, item.state.value),
+                )
+                coverage_options = {
+                    coverage_option(span): span
+                    for span in sorted_coverage
+                }
+                selected_coverage = st.selectbox("Correct coverage segment", list(coverage_options))
+                corrected_coverage_state = st.selectbox(
+                    "Correction",
+                    [item.value for item in CoverageState],
+                )
+                correct_coverage_submitted = st.form_submit_button("Correct")
+                delete_coverage_submitted = st.form_submit_button("Delete")
+            if correct_coverage_submitted or delete_coverage_submitted:
+                span = coverage_options[selected_coverage]
+                if correct_coverage_submitted:
+                    correct_coverage(
+                        state.paths,
+                        span,
+                        state=CoverageState(corrected_coverage_state),
+                    )
+                else:
+                    delete_coverage(state.paths, span)
+                rebuild_metrics(
+                    state.paths,
+                    annotations=load_annotations(state.paths),
+                    coverage=load_coverage(state.paths),
+                )
+                rebuild_project_summary(state.paths)
+                st.rerun()
+
         if state.annotations:
             with st.form("delete_annotation"):
                 sorted_annotations = sorted(
@@ -452,7 +574,18 @@ def run() -> None:
         st.metric("Jobs", summary.job_count)
         st.metric("Failed jobs", len(summary.failed_jobs))
         st.metric("Artifacts", summary.artifact_count)
-        if st.button("Export Dataset"):
+        export_warnings = export_precheck_warnings(
+            annotations=state.annotations,
+            coverage=state.coverage,
+            queue_items=state.queue_items,
+        )
+        export_anyway = False
+        if export_warnings:
+            st.warning("Export pre-check found issues.")
+            for warning in export_warnings:
+                st.write(f"- {warning}")
+            export_anyway = st.checkbox("Export anyway")
+        if st.button("Export Dataset", disabled=bool(export_warnings and not export_anyway)):
             manifest = export_dataset(state.paths)
             st.success(
                 f"Exported {manifest.training_example_count} training examples to "
