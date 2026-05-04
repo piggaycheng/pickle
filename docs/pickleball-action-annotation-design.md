@@ -300,6 +300,8 @@ Scope:
   - queue and annotation inspector
   - timeline and coverage map
 - Keyboard-first controls for accept, correct, dismiss, seek next/previous, and mark coverage.
+- Coverage correction controls should list existing coverage segments and let the user correct a segment's state or clear it back to `unreviewed`.
+- Annotation entry should warn about likely duplicates before writing another same-player, same-action event near an existing timestamp, while still allowing an explicit override.
 - UI reads and writes through annotation, coverage, identity, and queue modules only.
 - Heavy processing jobs must run outside the Streamlit render loop.
 - Tests should cover pure state helpers; UI behavior can be smoke-tested manually first.
@@ -313,6 +315,8 @@ Purpose: turn corrected annotations into training data only after enough trusted
 Scope:
 
 - Export readable timelines and structured training datasets.
+- Run an export pre-check before writing dataset files. Warn on unreviewed coverage gaps, `unknown` actions, likely duplicate annotations, and unresolved review queue items.
+- Allow an explicit "export anyway" override after the warning, because early datasets may still be useful for inspection.
 - Clip extraction around accepted annotations.
 - Model suggestion isolation: model outputs remain suggestions until accepted or corrected.
 - Reserve `source_tool` and `external_refs` for future CVAT interoperability, but keep the full CVAT converter deferred.
@@ -542,6 +546,8 @@ Rules:
 - Skipped non-game ranges are excluded from denominators.
 - Annotations are allowed only in reviewed or needs-recheck ranges unless explicitly marked as draft.
 - Overlapping coverage events resolve by latest event, while history remains append-only.
+- Correcting coverage writes a new coverage event for the selected span. The latest event becomes the materialized state.
+- Clearing a coverage span writes an `unreviewed` event for that span. History stays intact, and future rebuilds keep the cleared state unless another later event overrides it.
 
 ### Review Queue Item
 
@@ -665,6 +671,9 @@ The minimum useful UI needs:
 - Player selector: `A`, `B`, `C`, `D`.
 - Action hotkeys: drive, slice, volley, dink, lob, serve, unknown, not-hit.
 - Low-confidence identity checkpoints.
+- Coverage segment correction and clear-to-unreviewed controls.
+- Duplicate annotation warning with an explicit add-anyway override.
+- Export pre-check warnings before dataset export.
 - Export button for timeline and dataset.
 
 The UI can be local-only at first. A simple Streamlit, Gradio, or small web app is enough. The key is annotation speed.
