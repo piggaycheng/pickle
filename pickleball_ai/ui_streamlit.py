@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,6 +38,17 @@ from .summary import build_project_summary, rebuild_project_summary
 
 ACTION_LABELS = ["drive", "slice", "volley", "dink", "lob", "serve", "unknown", "not-hit"]
 DUPLICATE_TOLERANCE_MS = 300
+MANUAL_ANNOTATION_STATE_PREFIX = "manual_annotation:"
+
+
+def manual_annotation_form_key(scope: str, field: str) -> str:
+    return f"{MANUAL_ANNOTATION_STATE_PREFIX}{scope}:{field}"
+
+
+def clear_manual_annotation_form_state(session_state: MutableMapping[str, object]) -> None:
+    for key in list(session_state):
+        if key.startswith(MANUAL_ANNOTATION_STATE_PREFIX):
+            session_state.pop(key, None)
 
 
 @dataclass(frozen=True)
@@ -416,9 +428,29 @@ def run() -> None:
             default_event_time_ms = int(selected_queue_defaults.get("event_time_ms", 0))
             default_action = str(selected_queue_defaults.get("action", ACTION_LABELS[0]))
             default_action_index = ACTION_LABELS.index(default_action) if default_action in ACTION_LABELS else 0
-            event_time_ms = st.number_input("Time", min_value=0, step=100, value=default_event_time_ms)
-            player_id = st.selectbox("Player", [player.player_id for player in state.players])
-            action = st.selectbox("Action", ACTION_LABELS, index=default_action_index)
+            manual_form_scope = (
+                selected_queue_item.queue_item_id
+                if selected_queue_item is not None
+                else "manual"
+            )
+            event_time_ms = st.number_input(
+                "Time",
+                min_value=0,
+                step=100,
+                value=default_event_time_ms,
+                key=manual_annotation_form_key(manual_form_scope, "event_time_ms"),
+            )
+            player_id = st.selectbox(
+                "Player",
+                [player.player_id for player in state.players],
+                key=manual_annotation_form_key(manual_form_scope, "player_id"),
+            )
+            action = st.selectbox(
+                "Action",
+                ACTION_LABELS,
+                index=default_action_index,
+                key=manual_annotation_form_key(manual_form_scope, "action"),
+            )
             duplicates = find_duplicate_annotations(
                 state.annotations,
                 event_time_ms=int(event_time_ms),
@@ -432,7 +464,10 @@ def run() -> None:
                     for annotation in duplicates
                 )
                 st.warning(f"Possible duplicate annotation: {duplicate_labels}")
-                allow_duplicate = st.checkbox("Add anyway")
+                allow_duplicate = st.checkbox(
+                    "Add anyway",
+                    key=manual_annotation_form_key(manual_form_scope, "allow_duplicate"),
+                )
             submitted = st.form_submit_button("Add")
         if submitted:
             duplicates = find_duplicate_annotations(
@@ -467,6 +502,7 @@ def run() -> None:
                     coverage=load_coverage(state.paths),
                 )
                 rebuild_project_summary(state.paths)
+                clear_manual_annotation_form_state(st.session_state)
                 st.rerun()
 
         with st.form("coverage_update"):
