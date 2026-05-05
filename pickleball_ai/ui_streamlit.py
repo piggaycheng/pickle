@@ -40,6 +40,7 @@ from .storage import ProjectPaths, get_data_root, project_paths, read_json, read
 from .summary import build_project_summary, rebuild_project_summary
 
 ACTION_LABELS = ["drive", "slice", "volley", "dink", "lob", "serve", "unknown", "not-hit"]
+REQUIRED_ACTION_PLACEHOLDER = "Select action..."
 DUPLICATE_TOLERANCE_MS = 300
 MANUAL_ANNOTATION_STATE_PREFIX = "manual_annotation:"
 
@@ -208,7 +209,6 @@ def queue_item_defaults(paths: ProjectPaths, item: ReviewQueueItem) -> dict[str,
             return {}
         return {
             "event_time_ms": candidate.timestamp_ms,
-            "action": "unknown",
         }
     if item.reason == QueueReason.COVERAGE_GAP:
         start_text, _, end_text = item.target_ref.id.partition("-")
@@ -348,6 +348,8 @@ def add_annotation_from_queue(
     queue_item_id: str,
     window_radius_ms: int = 250,
 ) -> Annotation:
+    if action == REQUIRED_ACTION_PLACEHOLDER:
+        raise ValueError("action must be selected before accepting a queue item")
     annotation = add_manual_annotation(
         paths,
         video_id=video_id,
@@ -457,8 +459,17 @@ def run() -> None:
         st.subheader("Annotation Inspector")
         with st.form("manual_annotation"):
             default_event_time_ms = int(selected_queue_defaults.get("event_time_ms", 0))
-            default_action = str(selected_queue_defaults.get("action", ACTION_LABELS[0]))
-            default_action_index = ACTION_LABELS.index(default_action) if default_action in ACTION_LABELS else 0
+            queue_requires_action = (
+                selected_queue_item is not None
+                and selected_queue_item.reason == QueueReason.HIT_CANDIDATE
+            )
+            action_labels = (
+                [REQUIRED_ACTION_PLACEHOLDER, *ACTION_LABELS]
+                if queue_requires_action
+                else ACTION_LABELS
+            )
+            default_action = str(selected_queue_defaults.get("action", action_labels[0]))
+            default_action_index = action_labels.index(default_action) if default_action in action_labels else 0
             manual_form_scope = (
                 selected_queue_item.queue_item_id
                 if selected_queue_item is not None
@@ -478,7 +489,7 @@ def run() -> None:
             )
             action = st.selectbox(
                 "Action",
-                ACTION_LABELS,
+                action_labels,
                 index=default_action_index,
                 key=manual_annotation_form_key(manual_form_scope, "action"),
             )
@@ -501,13 +512,22 @@ def run() -> None:
                 )
             submitted = st.form_submit_button("Add")
         if submitted:
-            duplicates = find_duplicate_annotations(
-                state.annotations,
-                event_time_ms=int(event_time_ms),
-                player_id=player_id,
-                action=action,
+            missing_required_action = (
+                selected_queue_item is not None
+                and selected_queue_item.reason == QueueReason.HIT_CANDIDATE
+                and action == REQUIRED_ACTION_PLACEHOLDER
             )
-            if duplicates and not allow_duplicate:
+            duplicates = []
+            if not missing_required_action:
+                duplicates = find_duplicate_annotations(
+                    state.annotations,
+                    event_time_ms=int(event_time_ms),
+                    player_id=player_id,
+                    action=action,
+                )
+            if missing_required_action:
+                st.error("Choose an action before accepting this hit candidate.")
+            elif duplicates and not allow_duplicate:
                 st.error("Duplicate not added. Check Add anyway to keep both.")
             else:
                 if selected_queue_item is not None and selected_queue_item.reason == QueueReason.HIT_CANDIDATE:

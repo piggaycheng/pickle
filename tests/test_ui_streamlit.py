@@ -15,6 +15,7 @@ from pickleball_ai.schema import (
 )
 from pickleball_ai.storage import create_project_layout, write_json, write_jsonl
 from pickleball_ai.ui_streamlit import (
+    REQUIRED_ACTION_PLACEHOLDER,
     add_annotation_from_queue,
     add_manual_annotation,
     annotation_option,
@@ -184,7 +185,6 @@ def test_queue_item_defaults_load_hit_candidate_time(tmp_path):
     assert load_hit_candidate_for_queue_item(paths, item) == candidate
     assert queue_item_defaults(paths, item) == {
         "event_time_ms": 1234,
-        "action": "unknown",
     }
 
 
@@ -224,6 +224,35 @@ def test_add_annotation_from_queue_accepts_queue_item(tmp_path):
 
     assert load_annotations(paths) == [annotation]
     assert load_review_queue(paths)[0].status == QueueStatus.ACCEPTED
+
+
+def test_add_annotation_from_queue_requires_explicit_action(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    item = ReviewQueueItem(
+        queue_item_id="queue-1",
+        reason=QueueReason.HIT_CANDIDATE,
+        target_ref=TargetRef(type="hit_candidate", id="candidate-1"),
+        status=QueueStatus.OPEN,
+        priority=100,
+    )
+    write_review_queue(paths, [item])
+
+    try:
+        add_annotation_from_queue(
+            paths,
+            video_id="video-1",
+            event_time_ms=1000,
+            player_id="A",
+            action=REQUIRED_ACTION_PLACEHOLDER,
+            queue_item_id="queue-1",
+        )
+    except ValueError as exc:
+        assert "action must be selected" in str(exc)
+    else:
+        raise AssertionError("placeholder action should raise")
+
+    assert load_annotations(paths) == []
+    assert load_review_queue(paths)[0].status == QueueStatus.OPEN
 
 
 def test_update_queue_item_status_rejects_missing_item(tmp_path):
