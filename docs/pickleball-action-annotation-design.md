@@ -317,7 +317,10 @@ Scope:
 - Export readable timelines and structured training datasets.
 - Run an export pre-check before writing dataset files. Warn on unreviewed coverage gaps, `unknown` actions, likely duplicate annotations, and unresolved review queue items.
 - Allow an explicit "export anyway" override after the warning, because early datasets may still be useful for inspection.
-- Clip extraction around accepted annotations.
+- Clip extraction around trusted annotations via ffmpeg, recorded as a replayable `clip_extraction` job instead of a hidden export side effect.
+- `TrainingExample.clip_ref` is optional and separate from `video_ref`, so the source video path remains provenance while extracted clips are attached only when present.
+- Export manifests include clip summary metadata: `clips_dir_ref`, `clip_extraction_job_id`, and `clip_count`.
+- The Streamlit export flow exposes an `Extract clips with ffmpeg` toggle and fails the export clearly if clip extraction fails, instead of leaving half-written dataset artifacts behind.
 - Model suggestion isolation: model outputs remain suggestions until accepted or corrected.
 - Reserve `source_tool` and `external_refs` for future CVAT interoperability, but keep the full CVAT converter deferred.
 - Add evaluation harnesses for candidate/event/model versions once annotation volume is meaningful.
@@ -506,7 +509,7 @@ Every heavy processing step produces a replayable job record.
 {
   "job_id": "uuid",
   "video_id": "uuid",
-  "job_type": "download | metadata | pose_extraction | segment_detection | hit_candidate_detection | metrics",
+  "job_type": "download | metadata | pose_extraction | segment_detection | hit_candidate_detection | clip_extraction | metrics",
   "status": "queued | running | success | failed | canceled",
   "input_refs": ["videos/{video_id}/source.mp4"],
   "output_refs": ["artifacts/jobs/{job_id}/pose.jsonl"],
@@ -522,6 +525,8 @@ Every heavy processing step produces a replayable job record.
   "user_action": null
 }
 ```
+
+Clip extraction now uses the same job model as pose extraction and hit candidate generation. If ffmpeg fails, the system records a failed `clip_extraction` job with an actionable error instead of silently exporting partial data.
 
 ### Coverage
 
@@ -811,6 +816,30 @@ timestamp_ms,timestamp,player_id,action,source,confidence
 14860,00:14.860,B,slice,corrected_model_suggestion,1.0
 ```
 
+### Export Manifest and Training Examples
+
+Exported training examples may point at both the original source video and an extracted clip:
+
+```json
+{
+  "annotation_id": "uuid",
+  "video_ref": "videos/source.mp4",
+  "clip_ref": "exports/clips/ann_uuid.mp4"
+}
+```
+
+The export manifest tracks whether clip extraction ran and what it produced:
+
+```json
+{
+  "timeline_ref": "exports/timeline.csv",
+  "training_examples_ref": "exports/training_examples.jsonl",
+  "clips_dir_ref": "exports/clips",
+  "clip_extraction_job_id": "uuid",
+  "clip_count": 42
+}
+```
+
 ### Dataset Directory
 
 ```text
@@ -1025,7 +1054,7 @@ uv run pytest
 
 1. Run end-to-end QA on the local Streamlit workflow with `datasets/smoke-pose-001`.
 2. Verify manual annotation, coverage marking, queue display, metrics, summary, and export files from the UI.
-3. Decide whether the next milestone should be UI polish, real clip extraction with ffmpeg, or model suggestion quality.
+3. Decide whether the next milestone should be UI polish around exported clip preview, richer ffmpeg extraction options, or model suggestion quality.
 4. Run `uv run pytest`.
 5. Capture any workflow gaps before moving beyond the MVP slices.
 
