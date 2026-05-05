@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import csv
 import os
+import subprocess
 from pathlib import Path
 
 from .annotations import load_annotations
+from .clips import (
+    CLIPS_DIR_REF,
+    CommandRunner,
+    ClipExtractionError,
+    clip_ref_for_annotation,
+    extract_clips_job,
+)
 from .schema import (
     Annotation,
     ExportManifest,
+    JobStatus,
     Project,
     TimelineExportRow,
     TrainingExample,
@@ -38,13 +47,20 @@ def build_timeline_rows(annotations: list[Annotation]) -> list[TimelineExportRow
     ]
 
 
-def build_training_examples(annotations: list[Annotation], *, video_ref: str) -> list[TrainingExample]:
+def build_training_examples(
+    annotations: list[Annotation],
+    *,
+    video_ref: str,
+    clip_refs: dict[str, str] | None = None,
+) -> list[TrainingExample]:
+    clip_refs = clip_refs or {}
     return [
         TrainingExample(
             example_id=stable_id("training_example", annotation.annotation_id),
             annotation_id=annotation.annotation_id,
             video_id=annotation.video_id,
             video_ref=video_ref,
+            clip_ref=clip_refs.get(annotation.annotation_id),
             player_id=annotation.player_id,
             action=annotation.action,
             event_time_ms=annotation.event_time_ms,
@@ -60,12 +76,42 @@ def build_training_examples(annotations: list[Annotation], *, video_ref: str) ->
     ]
 
 
-def export_dataset(paths: ProjectPaths, annotations: list[Annotation] | None = None) -> ExportManifest:
+def export_dataset(
+    paths: ProjectPaths,
+    annotations: list[Annotation] | None = None,
+    *,
+    extract_clips: bool = False,
+    ffmpeg_path: str = "ffmpeg",
+    run_command: CommandRunner = subprocess.run,
+) -> ExportManifest:
     project = read_json(paths.project_json, Project)
     video = read_json(paths.video_json, Video)
     annotation_list = annotations if annotations is not None else load_annotations(paths)
+    trusted_annotations = _trusted_annotations(annotation_list)
+    clip_extraction_job_id: str | None = None
+    clip_refs: dict[str, str] = {}
+    if extract_clips and trusted_annotations:
+        clip_job = extract_clips_job(
+            paths,
+            video_id=video.video_id,
+            source_video_ref=video.local_path,
+            annotations=trusted_annotations,
+            ffmpeg_path=ffmpeg_path,
+            run_command=run_command,
+        )
+        clip_extraction_job_id = clip_job.job_id
+        if clip_job.status != JobStatus.SUCCESS:
+            raise ClipExtractionError(clip_job.error_message or "clip extraction failed")
+        clip_refs = {
+            annotation.annotation_id: clip_ref_for_annotation(annotation)
+            for annotation in trusted_annotations
+        }
     timeline_rows = build_timeline_rows(annotation_list)
-    training_examples = build_training_examples(annotation_list, video_ref=video.local_path)
+    training_examples = build_training_examples(
+        annotation_list,
+        video_ref=video.local_path,
+        clip_refs=clip_refs,
+    )
 
     timeline_path = safe_join(paths.root, *TIMELINE_REF.split("/"))
     training_examples_path = safe_join(paths.root, *TRAINING_EXAMPLES_REF.split("/"))
@@ -78,6 +124,9 @@ def export_dataset(paths: ProjectPaths, annotations: list[Annotation] | None = N
         video_id=video.video_id,
         timeline_ref=TIMELINE_REF,
         training_examples_ref=TRAINING_EXAMPLES_REF,
+        clips_dir_ref=CLIPS_DIR_REF if clip_refs else None,
+        clip_extraction_job_id=clip_extraction_job_id,
+        clip_count=len(clip_refs),
         annotation_count=len(annotation_list),
         training_example_count=len(training_examples),
     )
@@ -115,4 +164,3 @@ def _trusted_annotations(annotations: list[Annotation]) -> list[Annotation]:
         [annotation for annotation in annotations if annotation.source != "model_suggestion"],
         key=lambda item: (item.event_time_ms, item.annotation_id),
     )
-

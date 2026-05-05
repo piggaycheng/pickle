@@ -1,5 +1,7 @@
 import csv
+import subprocess
 
+from pickleball_ai.clips import ClipExtractionError
 from pickleball_ai.exports import (
     EXPORT_MANIFEST_REF,
     TIMELINE_REF,
@@ -8,9 +10,11 @@ from pickleball_ai.exports import (
     build_training_examples,
     export_dataset,
 )
+from pickleball_ai.jobs import load_job_history
 from pickleball_ai.schema import (
     Annotation,
     ExportManifest,
+    JobStatus,
     ModelSuggestion,
     Project,
     SourceType,
@@ -78,8 +82,20 @@ def test_training_examples_include_structured_clip_metadata():
     assert examples[0].annotation_id == "ann-1"
     assert examples[0].action == "slice"
     assert examples[0].video_ref == "videos/source.mp4"
+    assert examples[0].clip_ref is None
     assert examples[0].clip_start_ms == 800
     assert examples[0].pose_landmarks_ref == "artifacts/jobs/pose-job/pose.jsonl"
+
+
+def test_training_examples_include_extracted_clip_ref_when_available():
+    examples = build_training_examples(
+        [make_annotation("ann-1", action="slice")],
+        video_ref="videos/source.mp4",
+        clip_refs={"ann-1": "exports/clips/ann-1.mp4"},
+    )
+
+    assert examples[0].video_ref == "videos/source.mp4"
+    assert examples[0].clip_ref == "exports/clips/ann-1.mp4"
 
 
 def test_export_dataset_writes_timeline_training_examples_and_manifest(tmp_path):
@@ -103,6 +119,9 @@ def test_export_dataset_writes_timeline_training_examples_and_manifest(tmp_path)
 
     assert manifest.timeline_ref == TIMELINE_REF
     assert manifest.training_examples_ref == TRAINING_EXAMPLES_REF
+    assert manifest.clips_dir_ref is None
+    assert manifest.clip_extraction_job_id is None
+    assert manifest.clip_count == 0
     assert manifest.annotation_count == 2
     assert manifest.training_example_count == 1
     assert read_json(paths.root / EXPORT_MANIFEST_REF, ExportManifest) == manifest
@@ -110,6 +129,72 @@ def test_export_dataset_writes_timeline_training_examples_and_manifest(tmp_path)
     with (paths.root / TIMELINE_REF).open("r", encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     assert [row["annotation_id"] for row in rows] == ["ann-1"]
+
+
+def test_export_dataset_extracts_clips_before_writing_training_examples(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    (paths.root / "videos" / "source.mp4").write_bytes(b"fake video")
+
+    def fake_run(command, **kwargs):
+        with open(command[-1], "wb") as handle:
+            handle.write(b"clip")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    manifest = export_dataset(
+        paths,
+        annotations=[make_annotation("ann-1", source="manual")],
+        extract_clips=True,
+        run_command=fake_run,
+    )
+
+    assert manifest.clip_count == 1
+    assert manifest.clips_dir_ref == "exports/clips"
+    assert manifest.clip_extraction_job_id is not None
+    example = read_jsonl(paths.root / TRAINING_EXAMPLES_REF, TrainingExample)[0]
+    assert example.video_ref == "videos/source.mp4"
+    assert example.clip_ref == "exports/clips/ann-1.mp4"
+    assert (paths.root / "exports/clips/ann-1.mp4").read_bytes() == b"clip"
+
+
+def test_export_dataset_records_failed_clip_job_and_does_not_write_export_files(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    (paths.root / "videos" / "source.mp4").write_bytes(b"fake video")
+
+    def failed_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="bad clip range")
+
+    try:
+        export_dataset(
+            paths,
+            annotations=[make_annotation("ann-1", source="manual")],
+            extract_clips=True,
+            run_command=failed_run,
+        )
+    except ClipExtractionError as exc:
+        assert "bad clip range" in str(exc)
+    else:
+        raise AssertionError("failed clip extraction should abort export")
+
+    assert load_job_history(paths.processing_jobs_jsonl)[-1].status == JobStatus.FAILED
+    assert not (paths.root / EXPORT_MANIFEST_REF).exists()
+    assert not (paths.root / TRAINING_EXAMPLES_REF).exists()
+    assert not (paths.root / TIMELINE_REF).exists()
 
 
 def test_model_suggestions_round_trip_separately_from_annotations(tmp_path):
@@ -162,4 +247,3 @@ def test_evaluate_suggestions_compares_against_accepted_annotation_refs():
         "player_match_count": 1,
         "unmatched_suggestion_count": 1,
     }
-

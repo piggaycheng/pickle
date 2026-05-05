@@ -362,3 +362,5 @@ def test_streamlit_entrypoint_exposes_export_button():
     source = __import__("pickleball_ai.ui_streamlit", fromlist=["run"])
 
     assert "Export Dataset" in source.run.__code__.co_consts
+    assert "Extract clips with ffmpeg" in source.run.__code__.co_consts
+    assert "Clip extraction failed: " in source.run.__code__.co_consts

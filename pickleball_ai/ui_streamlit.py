@@ -11,6 +11,7 @@ from .annotations import (
     load_annotations,
     rebuild_annotations,
 )
+from .clips import ClipExtractionError
 from .coverage import append_coverage_event, load_coverage, rebuild_coverage
 from .events import hit_candidates_path
 from .exports import export_dataset
@@ -621,12 +622,23 @@ def run() -> None:
             for warning in export_warnings:
                 st.write(f"- {warning}")
             export_anyway = st.checkbox("Export anyway")
+        extract_export_clips = st.checkbox("Extract clips with ffmpeg")
         if st.button("Export Dataset", disabled=bool(export_warnings and not export_anyway)):
-            manifest = export_dataset(state.paths)
-            st.success(
-                f"Exported {manifest.training_example_count} training examples to "
-                f"{manifest.training_examples_ref}."
-            )
+            try:
+                manifest = export_dataset(state.paths, extract_clips=extract_export_clips)
+            except ClipExtractionError as exc:
+                rebuild_project_summary(state.paths)
+                st.error(f"Clip extraction failed: {exc}")
+            else:
+                clip_text = (
+                    f" and {manifest.clip_count} clips"
+                    if manifest.clip_count
+                    else ""
+                )
+                st.success(
+                    f"Exported {manifest.training_example_count} training examples"
+                    f"{clip_text} to {manifest.training_examples_ref}."
+                )
 
 
 if __name__ == "__main__":

@@ -44,6 +44,7 @@ class JobType(StrEnum):
     POSE_EXTRACTION = "pose_extraction"
     SEGMENT_DETECTION = "segment_detection"
     HIT_CANDIDATE_DETECTION = "hit_candidate_detection"
+    CLIP_EXTRACTION = "clip_extraction"
     METRICS = "metrics"
 
 
@@ -421,6 +422,7 @@ class TrainingExample(StrictModel):
     annotation_id: str
     video_id: str
     video_ref: str
+    clip_ref: str | None = None
     player_id: str
     action: str
     event_time_ms: int = Field(ge=0)
@@ -432,7 +434,7 @@ class TrainingExample(StrictModel):
     source_tool: str
     external_refs: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("video_ref", "pose_landmarks_ref")
+    @field_validator("video_ref", "clip_ref", "pose_landmarks_ref")
     @classmethod
     def validate_refs(cls, value: str | None) -> str | None:
         if value is None:
@@ -446,13 +448,18 @@ class ExportManifest(StrictModel):
     video_id: str
     timeline_ref: str
     training_examples_ref: str
+    clips_dir_ref: str | None = None
+    clip_extraction_job_id: str | None = None
+    clip_count: int = Field(default=0, ge=0)
     annotation_count: int = Field(ge=0)
     training_example_count: int = Field(ge=0)
     generated_at: datetime = Field(default_factory=utc_now)
 
-    @field_validator("timeline_ref", "training_examples_ref")
+    @field_validator("timeline_ref", "training_examples_ref", "clips_dir_ref")
     @classmethod
-    def validate_export_refs(cls, value: str) -> str:
+    def validate_export_refs(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _validate_relative_ref(value)
 
 
