@@ -8,8 +8,10 @@ from .annotations import (
     append_annotation_event,
     create_annotation_event,
     delete_annotation_event,
+    load_annotation_events,
     load_annotations,
     rebuild_annotations,
+    update_annotation_event,
 )
 from .clips import ClipExtractionError
 from .coverage import append_coverage_event, load_coverage, rebuild_coverage
@@ -282,7 +284,10 @@ def coverage_option(span: CoverageSpan) -> str:
     return f"{span.start_ms}-{span.end_ms}ms | {span.state.value} | {span.source_event_id}"
 
 
-def export_clip_preview_rows(paths: ProjectPaths) -> list[dict[str, object]]:
+def export_clip_preview_rows(
+    paths: ProjectPaths,
+    annotations: list[Annotation] | None = None,
+) -> list[dict[str, object]]:
     manifest_path = safe_join(paths.root, *EXPORT_MANIFEST_REF.split("/"))
     if not manifest_path.exists():
         return []
@@ -292,17 +297,22 @@ def export_clip_preview_rows(paths: ProjectPaths) -> list[dict[str, object]]:
 
     examples_path = safe_join(paths.root, *manifest.training_examples_ref.split("/"))
     examples = read_jsonl(examples_path, TrainingExample)
+    annotation_by_id = {
+        annotation.annotation_id: annotation
+        for annotation in annotations or []
+    }
     rows: list[dict[str, object]] = []
     for example in examples:
         if example.clip_ref is None:
             continue
         clip_path = safe_join(paths.root, *example.clip_ref.split("/"))
+        current_annotation = annotation_by_id.get(example.annotation_id)
         rows.append(
             {
                 "annotation_id": example.annotation_id,
                 "time_ms": example.event_time_ms,
                 "player": example.player_id,
-                "action": example.action,
+                "action": current_annotation.action if current_annotation is not None else example.action,
                 "clip_ref": example.clip_ref,
                 "exists": clip_path.exists(),
             }
@@ -376,6 +386,30 @@ def delete_annotation(paths: ProjectPaths, annotation_id: str) -> Annotation:
     )
     rebuild_annotations(paths)
     return annotation
+
+
+def correct_annotation_action(paths: ProjectPaths, annotation_id: str, action: str) -> Annotation:
+    if action == REQUIRED_ACTION_PLACEHOLDER:
+        raise ValueError("action must be selected before correcting an annotation")
+    annotations = load_annotations(paths)
+    annotation = next(
+        (item for item in annotations if item.annotation_id == annotation_id),
+        None,
+    )
+    if annotation is None:
+        raise ValueError(f"annotation not found: {annotation_id}")
+    if annotation.action == action:
+        return annotation
+    append_annotation_event(
+        paths,
+        update_annotation_event(
+            annotation,
+            {"action": action},
+            reason="streamlit_clip_preview_action_correction",
+        ),
+    )
+    updated_annotations = rebuild_annotations(paths)
+    return next(item for item in updated_annotations if item.annotation_id == annotation_id)
 
 
 def mark_coverage(
@@ -690,7 +724,7 @@ def run() -> None:
                     f"{clip_text} to {manifest.training_examples_ref}."
                 )
 
-        clip_preview_rows = export_clip_preview_rows(state.paths)
+        clip_preview_rows = export_clip_preview_rows(state.paths, state.annotations)
         if clip_preview_rows:
             st.subheader("Exported Clips")
             st.dataframe(clip_preview_rows, use_container_width=True, hide_index=True)
@@ -704,8 +738,37 @@ def run() -> None:
             }
             if playable_clips:
                 selected_clip = st.selectbox("Preview clip", list(playable_clips))
-                clip_ref = str(playable_clips[selected_clip]["clip_ref"])
+                selected_clip_row = playable_clips[selected_clip]
+                clip_ref = str(selected_clip_row["clip_ref"])
                 st.video(str(safe_join(state.paths.root, *clip_ref.split("/"))))
+                with st.form("clip_preview_correction"):
+                    current_action = str(selected_clip_row["action"])
+                    current_action_index = (
+                        ACTION_LABELS.index(current_action)
+                        if current_action in ACTION_LABELS
+                        else 0
+                    )
+                    corrected_action = st.selectbox(
+                        "Correct action",
+                        ACTION_LABELS,
+                        index=current_action_index,
+                    )
+                    correction_submitted = st.form_submit_button("Update action")
+                if correction_submitted:
+                    correct_annotation_action(
+                        state.paths,
+                        str(selected_clip_row["annotation_id"]),
+                        corrected_action,
+                    )
+                    rebuild_metrics(
+                        state.paths,
+                        annotations=load_annotations(state.paths),
+                        coverage=load_coverage(state.paths),
+                        annotation_events=load_annotation_events(state.paths),
+                    )
+                    rebuild_project_summary(state.paths)
+                    st.info("Action updated. Re-export the dataset to refresh training_examples.jsonl.")
+                    st.rerun()
             else:
                 st.warning("Export manifest references clips, but no clip files were found.")
 

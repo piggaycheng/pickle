@@ -1,4 +1,5 @@
 from pickleball_ai.annotations import load_annotations
+from pickleball_ai.annotations import load_annotation_events
 from pickleball_ai.coverage import load_coverage
 from pickleball_ai.schema import (
     CoverageState,
@@ -21,6 +22,7 @@ from pickleball_ai.ui_streamlit import (
     annotation_option,
     annotation_rows,
     clear_manual_annotation_form_state,
+    correct_annotation_action,
     correct_coverage,
     coverage_option,
     coverage_rows,
@@ -282,6 +284,47 @@ def test_delete_annotation_writes_deleted_event_and_removes_materialized_annotat
     assert load_annotations(paths) == []
 
 
+def test_correct_annotation_action_updates_materialized_annotation(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    annotation = add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1000,
+        player_id="A",
+        action="unknown",
+    )
+
+    updated = correct_annotation_action(paths, annotation.annotation_id, "drive")
+
+    annotations = load_annotations(paths)
+    events = load_annotation_events(paths)
+    assert updated.action == "drive"
+    assert annotations[0].action == "drive"
+    assert events[-1].before["action"] == "unknown"
+    assert events[-1].after == {"action": "drive"}
+    assert events[-1].reason == "streamlit_clip_preview_action_correction"
+
+
+def test_correct_annotation_action_rejects_placeholder(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    annotation = add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1000,
+        player_id="A",
+        action="unknown",
+    )
+
+    try:
+        correct_annotation_action(paths, annotation.annotation_id, REQUIRED_ACTION_PLACEHOLDER)
+    except ValueError as exc:
+        assert "action must be selected" in str(exc)
+    else:
+        raise AssertionError("placeholder action should raise")
+
+    assert load_annotations(paths)[0].action == "unknown"
+
+
 def test_annotation_option_includes_human_context_and_id(tmp_path):
     paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
     annotation = add_manual_annotation(
@@ -393,6 +436,50 @@ def test_export_clip_preview_rows_lists_extracted_clips(tmp_path):
             "exists": True,
         }
     ]
+
+
+def test_export_clip_preview_rows_prefers_current_annotation_action(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    annotation = add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1000,
+        player_id="A",
+        action="slice",
+    )
+    manifest = ExportManifest(
+        project_id="project-1",
+        video_id="video-1",
+        timeline_ref="exports/timeline.csv",
+        training_examples_ref="exports/training_examples.jsonl",
+        clips_dir_ref="exports/clips",
+        clip_extraction_job_id="job-1",
+        clip_count=1,
+        annotation_count=1,
+        training_example_count=1,
+    )
+    example = TrainingExample(
+        example_id="example-1",
+        annotation_id=annotation.annotation_id,
+        video_id="video-1",
+        video_ref="videos/source.mp4",
+        clip_ref=f"exports/clips/{annotation.annotation_id}.mp4",
+        player_id="A",
+        action="drive",
+        event_time_ms=1000,
+        clip_start_ms=800,
+        clip_end_ms=1200,
+        timing_confidence="exact",
+        source_tool="pickle",
+    )
+    write_json(paths.root / "exports/export_manifest.json", manifest)
+    write_jsonl(paths.root / "exports/training_examples.jsonl", [example])
+    (paths.root / "exports/clips").mkdir(parents=True)
+    (paths.root / f"exports/clips/{annotation.annotation_id}.mp4").write_bytes(b"clip")
+
+    rows = export_clip_preview_rows(paths, load_annotations(paths))
+
+    assert rows[0]["action"] == "slice"
 
 
 def test_export_precheck_warns_about_dataset_quality_issues(tmp_path):
