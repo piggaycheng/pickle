@@ -16,7 +16,7 @@ from .annotations import (
 from .clips import ClipExtractionError
 from .coverage import append_coverage_event, load_coverage, rebuild_coverage
 from .events import hit_candidates_path
-from .exports import EXPORT_MANIFEST_REF, export_dataset
+from .exports import EXPORT_MANIFEST_REF, clear_export_outputs, export_dataset
 from .metrics import compute_metrics, rebuild_metrics
 from .players import default_players, load_players, players_path, write_players
 from .queue import load_review_queue
@@ -282,6 +282,17 @@ def coverage_rows(coverage: list[CoverageSpan]) -> list[dict[str, object]]:
 
 def coverage_option(span: CoverageSpan) -> str:
     return f"{span.start_ms}-{span.end_ms}ms | {span.state.value} | {span.source_event_id}"
+
+
+def editable_coverage_spans(coverage: list[CoverageSpan]) -> list[CoverageSpan]:
+    return [
+        span
+        for span in sorted(
+            coverage,
+            key=lambda item: (item.start_ms, item.end_ms, item.state.value),
+        )
+        if span.state != CoverageState.UNREVIEWED
+    ]
 
 
 def export_clip_preview_rows(
@@ -618,22 +629,26 @@ def run() -> None:
                 st.rerun()
 
         if state.coverage:
-            with st.form("coverage_correction"):
-                sorted_coverage = sorted(
-                    state.coverage,
-                    key=lambda item: (item.start_ms, item.end_ms, item.state.value),
-                )
-                coverage_options = {
-                    coverage_option(span): span
-                    for span in sorted_coverage
-                }
-                selected_coverage = st.selectbox("Correct coverage segment", list(coverage_options))
-                corrected_coverage_state = st.selectbox(
-                    "Correction",
-                    [item.value for item in CoverageState],
-                )
-                correct_coverage_submitted = st.form_submit_button("Correct")
-                delete_coverage_submitted = st.form_submit_button("Delete")
+            editable_coverage = editable_coverage_spans(state.coverage)
+            if editable_coverage:
+                with st.form("coverage_correction"):
+                    coverage_options = {
+                        coverage_option(span): span
+                        for span in editable_coverage
+                    }
+                    selected_coverage = st.selectbox("Correct coverage segment", list(coverage_options))
+                    corrected_coverage_state = st.selectbox(
+                        "Correction",
+                        [item.value for item in CoverageState],
+                    )
+                    correct_coverage_submitted = st.form_submit_button("Correct")
+                    delete_coverage_submitted = st.form_submit_button("Clear to unreviewed")
+            else:
+                correct_coverage_submitted = False
+                delete_coverage_submitted = False
+                coverage_options = {}
+                selected_coverage = ""
+                corrected_coverage_state = CoverageState.UNREVIEWED.value
             if correct_coverage_submitted or delete_coverage_submitted:
                 span = coverage_options[selected_coverage]
                 if correct_coverage_submitted:
@@ -723,6 +738,14 @@ def run() -> None:
                     f"Exported {manifest.training_example_count} training examples"
                     f"{clip_text} to {manifest.training_examples_ref}."
                 )
+        if st.button("Clear export outputs"):
+            removed_refs = clear_export_outputs(state.paths)
+            rebuild_project_summary(state.paths)
+            if removed_refs:
+                st.success(f"Cleared {len(removed_refs)} export output(s).")
+            else:
+                st.info("No export outputs to clear.")
+            st.rerun()
 
         clip_preview_rows = export_clip_preview_rows(state.paths, state.annotations)
         if clip_preview_rows:

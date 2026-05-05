@@ -8,6 +8,7 @@ from pickleball_ai.exports import (
     TRAINING_EXAMPLES_REF,
     build_timeline_rows,
     build_training_examples,
+    clear_export_outputs,
     export_dataset,
 )
 from pickleball_ai.jobs import load_job_history
@@ -195,6 +196,55 @@ def test_export_dataset_records_failed_clip_job_and_does_not_write_export_files(
     assert not (paths.root / EXPORT_MANIFEST_REF).exists()
     assert not (paths.root / TRAINING_EXAMPLES_REF).exists()
     assert not (paths.root / TIMELINE_REF).exists()
+
+
+def test_clear_export_outputs_removes_export_files_and_clips_only(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    (paths.root / "videos" / "source.mp4").write_bytes(b"fake video")
+
+    def fake_run(command, **kwargs):
+        with open(command[-1], "wb") as handle:
+            handle.write(b"clip")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    export_dataset(
+        paths,
+        annotations=[make_annotation("ann-1", source="manual")],
+        extract_clips=True,
+        run_command=fake_run,
+    )
+    artifact_file = paths.job_dir("pose-job") / "pose.jsonl"
+    artifact_file.parent.mkdir(parents=True)
+    artifact_file.write_text("{}\n", encoding="utf-8")
+
+    removed_refs = clear_export_outputs(paths)
+
+    assert removed_refs == [
+        TIMELINE_REF,
+        TRAINING_EXAMPLES_REF,
+        EXPORT_MANIFEST_REF,
+        "exports/clips",
+    ]
+    assert not (paths.root / TIMELINE_REF).exists()
+    assert not (paths.root / TRAINING_EXAMPLES_REF).exists()
+    assert not (paths.root / EXPORT_MANIFEST_REF).exists()
+    assert not (paths.root / "exports/clips").exists()
+    assert artifact_file.read_text(encoding="utf-8") == "{}\n"
+    assert paths.processing_jobs_jsonl.exists()
+
+
+def test_clear_export_outputs_noops_without_existing_exports(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+
+    assert clear_export_outputs(paths) == []
 
 
 def test_model_suggestions_round_trip_separately_from_annotations(tmp_path):

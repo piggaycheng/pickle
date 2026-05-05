@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from .storage import ProjectPaths, read_json, safe_join, write_json, write_jsonl
 TIMELINE_REF = "exports/timeline.csv"
 TRAINING_EXAMPLES_REF = "exports/training_examples.jsonl"
 EXPORT_MANIFEST_REF = "exports/export_manifest.json"
+EXPORT_OUTPUT_REFS = (TIMELINE_REF, TRAINING_EXAMPLES_REF, EXPORT_MANIFEST_REF)
 
 
 def build_timeline_rows(annotations: list[Annotation]) -> list[TimelineExportRow]:
@@ -157,6 +159,23 @@ def write_timeline_csv(path: Path, rows: list[TimelineExportRow]) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     tmp_path.replace(path)
+
+
+def clear_export_outputs(paths: ProjectPaths) -> list[str]:
+    removed_refs: list[str] = []
+    for ref in EXPORT_OUTPUT_REFS:
+        output_path = safe_join(paths.root, *ref.split("/"))
+        if output_path.exists():
+            output_path.unlink()
+            removed_refs.append(ref)
+
+    clips_dir = safe_join(paths.root, *CLIPS_DIR_REF.split("/"))
+    if clips_dir.exists():
+        if not clips_dir.is_dir():
+            raise ClipExtractionError(f"expected clips path to be a directory: {CLIPS_DIR_REF}")
+        shutil.rmtree(clips_dir)
+        removed_refs.append(CLIPS_DIR_REF)
+    return removed_refs
 
 
 def _trusted_annotations(annotations: list[Annotation]) -> list[Annotation]:

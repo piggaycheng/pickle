@@ -29,6 +29,7 @@ from pickleball_ai.ui_streamlit import (
     delete_annotation,
     delete_coverage,
     discover_projects,
+    editable_coverage_spans,
     export_clip_preview_rows,
     export_precheck_warnings,
     find_duplicate_annotations,
@@ -388,6 +389,14 @@ def test_delete_coverage_clears_selected_span_to_unreviewed(tmp_path):
     assert coverage[0].source_event_id == event.coverage_event_id
 
 
+def test_editable_coverage_spans_excludes_unreviewed_segments(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    mark_coverage(paths, start_ms=0, end_ms=1000, state=CoverageState.REVIEWED)
+    delete_coverage(paths, load_coverage(paths)[0])
+
+    assert editable_coverage_spans(load_coverage(paths)) == []
+
+
 def test_export_clip_preview_rows_returns_empty_without_manifest(tmp_path):
     paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
 
@@ -532,4 +541,6 @@ def test_streamlit_entrypoint_exposes_export_button():
 
     assert "Export Dataset" in source.run.__code__.co_consts
     assert "Extract clips with ffmpeg" in source.run.__code__.co_consts
+    assert "Clear export outputs" in source.run.__code__.co_consts
     assert "Clip extraction failed: " in source.run.__code__.co_consts
+    assert "Clear to unreviewed" in source.run.__code__.co_consts
