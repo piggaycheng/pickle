@@ -2,6 +2,7 @@ from pickleball_ai.annotations import load_annotations
 from pickleball_ai.coverage import load_coverage
 from pickleball_ai.schema import (
     CoverageState,
+    ExportManifest,
     HitCandidate,
     Project,
     QueueReason,
@@ -9,9 +10,10 @@ from pickleball_ai.schema import (
     ReviewQueueItem,
     SourceType,
     TargetRef,
+    TrainingExample,
     Video,
 )
-from pickleball_ai.storage import create_project_layout, write_jsonl
+from pickleball_ai.storage import create_project_layout, write_json, write_jsonl
 from pickleball_ai.ui_streamlit import (
     add_annotation_from_queue,
     add_manual_annotation,
@@ -24,6 +26,7 @@ from pickleball_ai.ui_streamlit import (
     delete_annotation,
     delete_coverage,
     discover_projects,
+    export_clip_preview_rows,
     export_precheck_warnings,
     find_duplicate_annotations,
     load_hit_candidate_for_queue_item,
@@ -311,6 +314,56 @@ def test_delete_coverage_clears_selected_span_to_unreviewed(tmp_path):
     assert coverage[0].state == CoverageState.UNREVIEWED
     assert coverage[0].reason == "streamlit_delete_coverage"
     assert coverage[0].source_event_id == event.coverage_event_id
+
+
+def test_export_clip_preview_rows_returns_empty_without_manifest(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+
+    assert export_clip_preview_rows(paths) == []
+
+
+def test_export_clip_preview_rows_lists_extracted_clips(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    manifest = ExportManifest(
+        project_id="project-1",
+        video_id="video-1",
+        timeline_ref="exports/timeline.csv",
+        training_examples_ref="exports/training_examples.jsonl",
+        clips_dir_ref="exports/clips",
+        clip_extraction_job_id="job-1",
+        clip_count=1,
+        annotation_count=1,
+        training_example_count=1,
+    )
+    example = TrainingExample(
+        example_id="example-1",
+        annotation_id="ann-1",
+        video_id="video-1",
+        video_ref="videos/source.mp4",
+        clip_ref="exports/clips/ann-1.mp4",
+        player_id="A",
+        action="drive",
+        event_time_ms=1000,
+        clip_start_ms=800,
+        clip_end_ms=1200,
+        timing_confidence="exact",
+        source_tool="pickle",
+    )
+    write_json(paths.root / "exports/export_manifest.json", manifest)
+    write_jsonl(paths.root / "exports/training_examples.jsonl", [example])
+    (paths.root / "exports/clips").mkdir(parents=True)
+    (paths.root / "exports/clips/ann-1.mp4").write_bytes(b"clip")
+
+    assert export_clip_preview_rows(paths) == [
+        {
+            "annotation_id": "ann-1",
+            "time_ms": 1000,
+            "player": "A",
+            "action": "drive",
+            "clip_ref": "exports/clips/ann-1.mp4",
+            "exists": True,
+        }
+    ]
 
 
 def test_export_precheck_warns_about_dataset_quality_issues(tmp_path):

@@ -14,7 +14,7 @@ from .annotations import (
 from .clips import ClipExtractionError
 from .coverage import append_coverage_event, load_coverage, rebuild_coverage
 from .events import hit_candidates_path
-from .exports import export_dataset
+from .exports import EXPORT_MANIFEST_REF, export_dataset
 from .metrics import compute_metrics, rebuild_metrics
 from .players import default_players, load_players, players_path, write_players
 from .queue import load_review_queue
@@ -23,6 +23,7 @@ from .schema import (
     CoverageEvent,
     CoverageSpan,
     CoverageState,
+    ExportManifest,
     HitCandidate,
     Player,
     Project,
@@ -32,9 +33,10 @@ from .schema import (
     ReviewQueueItem,
     TimeWindow,
     TimingConfidence,
+    TrainingExample,
     Video,
 )
-from .storage import ProjectPaths, get_data_root, project_paths, read_json, read_jsonl, write_jsonl
+from .storage import ProjectPaths, get_data_root, project_paths, read_json, read_jsonl, safe_join, write_jsonl
 from .summary import build_project_summary, rebuild_project_summary
 
 ACTION_LABELS = ["drive", "slice", "volley", "dink", "lob", "serve", "unknown", "not-hit"]
@@ -278,6 +280,34 @@ def coverage_rows(coverage: list[CoverageSpan]) -> list[dict[str, object]]:
 
 def coverage_option(span: CoverageSpan) -> str:
     return f"{span.start_ms}-{span.end_ms}ms | {span.state.value} | {span.source_event_id}"
+
+
+def export_clip_preview_rows(paths: ProjectPaths) -> list[dict[str, object]]:
+    manifest_path = safe_join(paths.root, *EXPORT_MANIFEST_REF.split("/"))
+    if not manifest_path.exists():
+        return []
+    manifest = read_json(manifest_path, ExportManifest)
+    if manifest.clips_dir_ref is None or manifest.clip_count == 0:
+        return []
+
+    examples_path = safe_join(paths.root, *manifest.training_examples_ref.split("/"))
+    examples = read_jsonl(examples_path, TrainingExample)
+    rows: list[dict[str, object]] = []
+    for example in examples:
+        if example.clip_ref is None:
+            continue
+        clip_path = safe_join(paths.root, *example.clip_ref.split("/"))
+        rows.append(
+            {
+                "annotation_id": example.annotation_id,
+                "time_ms": example.event_time_ms,
+                "player": example.player_id,
+                "action": example.action,
+                "clip_ref": example.clip_ref,
+                "exists": clip_path.exists(),
+            }
+        )
+    return rows
 
 
 def add_manual_annotation(
@@ -639,6 +669,25 @@ def run() -> None:
                     f"Exported {manifest.training_example_count} training examples"
                     f"{clip_text} to {manifest.training_examples_ref}."
                 )
+
+        clip_preview_rows = export_clip_preview_rows(state.paths)
+        if clip_preview_rows:
+            st.subheader("Exported Clips")
+            st.dataframe(clip_preview_rows, use_container_width=True, hide_index=True)
+            playable_clips = {
+                (
+                    f"{row['time_ms']}ms | {row['player']} | "
+                    f"{row['action']} | {row['annotation_id']}"
+                ): row
+                for row in clip_preview_rows
+                if row["exists"]
+            }
+            if playable_clips:
+                selected_clip = st.selectbox("Preview clip", list(playable_clips))
+                clip_ref = str(playable_clips[selected_clip]["clip_ref"])
+                st.video(str(safe_join(state.paths.root, *clip_ref.split("/"))))
+            else:
+                st.warning("Export manifest references clips, but no clip files were found.")
 
 
 if __name__ == "__main__":
