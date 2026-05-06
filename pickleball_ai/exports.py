@@ -237,6 +237,67 @@ def export_run_rows(paths: ProjectPaths) -> list[dict[str, object]]:
     return sorted(rows, key=lambda row: str(row["generated_at"]), reverse=True)
 
 
+def promote_export_run_to_latest(paths: ProjectPaths, export_id: str) -> ExportManifest:
+    run_dir_ref = export_run_dir_ref(export_id)
+    run_manifest_ref = export_manifest_ref(run_dir_ref)
+    run_manifest_path = safe_join(paths.root, *run_manifest_ref.split("/"))
+    if not run_manifest_path.exists():
+        raise FileNotFoundError(f"export run manifest not found: {run_manifest_ref}")
+
+    run_manifest = read_json(run_manifest_path, ExportManifest)
+    _clear_latest_export_outputs(paths)
+
+    shutil.copy2(
+        safe_join(paths.root, *run_manifest.timeline_ref.split("/")),
+        safe_join(paths.root, *TIMELINE_REF.split("/")),
+    )
+
+    latest_clips_dir_ref = export_clips_dir_ref(LATEST_EXPORT_DIR_REF)
+    latest_clip_refs: dict[str, str] = {}
+    if run_manifest.clips_dir_ref is not None:
+        run_clips_dir = safe_join(paths.root, *run_manifest.clips_dir_ref.split("/"))
+        if not run_clips_dir.exists():
+            raise FileNotFoundError(f"export run clips dir not found: {run_manifest.clips_dir_ref}")
+        latest_clips_dir = safe_join(paths.root, *latest_clips_dir_ref.split("/"))
+        shutil.copytree(run_clips_dir, latest_clips_dir)
+        latest_clip_refs = {
+            clip_path.stem: f"{latest_clips_dir_ref}/{clip_path.name}"
+            for clip_path in latest_clips_dir.iterdir()
+            if clip_path.is_file()
+        }
+
+    run_examples = read_jsonl(
+        safe_join(paths.root, *run_manifest.training_examples_ref.split("/")),
+        TrainingExample,
+    )
+    latest_examples = [
+        TrainingExample.model_validate(
+            {
+                **example.model_dump(mode="json"),
+                "clip_ref": latest_clip_refs.get(example.annotation_id) if example.clip_ref is not None else None,
+            }
+        )
+        for example in run_examples
+    ]
+    write_jsonl(safe_join(paths.root, *TRAINING_EXAMPLES_REF.split("/")), latest_examples)
+
+    latest_manifest = ExportManifest(
+        export_id=run_manifest.export_id,
+        project_id=run_manifest.project_id,
+        video_id=run_manifest.video_id,
+        timeline_ref=TIMELINE_REF,
+        training_examples_ref=TRAINING_EXAMPLES_REF,
+        clips_dir_ref=latest_clips_dir_ref if run_manifest.clips_dir_ref is not None else None,
+        clip_extraction_job_id=run_manifest.clip_extraction_job_id,
+        clip_count=run_manifest.clip_count,
+        annotation_count=run_manifest.annotation_count,
+        training_example_count=run_manifest.training_example_count,
+        generated_at=run_manifest.generated_at,
+    )
+    write_json(safe_join(paths.root, *EXPORT_MANIFEST_REF.split("/")), latest_manifest)
+    return latest_manifest
+
+
 def write_timeline_csv(path: Path, rows: list[TimelineExportRow]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.tmp")

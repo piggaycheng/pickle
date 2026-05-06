@@ -15,6 +15,7 @@ from pickleball_ai.exports import (
     export_run_rows,
     export_staleness_warnings,
     export_training_examples_ref,
+    promote_export_run_to_latest,
 )
 from pickleball_ai.jobs import load_job_history
 from pickleball_ai.schema import (
@@ -293,6 +294,74 @@ def test_export_run_rows_list_runs_newest_first(tmp_path):
     assert rows[0]["annotations"] == 2
     assert rows[0]["manifest_ref"] == f"exports/runs/{second.export_id}/export_manifest.json"
     assert rows[1]["training_examples"] == 1
+
+
+def test_promote_export_run_to_latest_replaces_latest_outputs(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    first = export_dataset(paths, annotations=[make_annotation("ann-1", source="manual", action="drive")])
+    second = export_dataset(paths, annotations=[make_annotation("ann-2", source="manual", action="slice")])
+
+    promoted = promote_export_run_to_latest(paths, first.export_id)
+
+    assert promoted.export_id == first.export_id
+    assert promoted.generated_at == first.generated_at
+    assert read_json(paths.root / EXPORT_MANIFEST_REF, ExportManifest) == promoted
+    assert read_jsonl(paths.root / TRAINING_EXAMPLES_REF, TrainingExample)[0].annotation_id == "ann-1"
+    assert read_jsonl(paths.root / TRAINING_EXAMPLES_REF, TrainingExample)[0].action == "drive"
+    assert (paths.root / export_manifest_ref(export_run_dir_ref(second.export_id))).exists()
+
+
+def test_promote_export_run_to_latest_rewrites_clip_refs(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    (paths.root / "videos" / "source.mp4").write_bytes(b"fake video")
+
+    def fake_run(command, **kwargs):
+        with open(command[-1], "wb") as handle:
+            handle.write(b"clip")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    first = export_dataset(
+        paths,
+        annotations=[make_annotation("ann-1", source="manual", action="drive")],
+        extract_clips=True,
+        run_command=fake_run,
+    )
+    export_dataset(paths, annotations=[make_annotation("ann-2", source="manual", action="slice")])
+
+    promoted = promote_export_run_to_latest(paths, first.export_id)
+
+    latest_example = read_jsonl(paths.root / TRAINING_EXAMPLES_REF, TrainingExample)[0]
+    assert promoted.clips_dir_ref == "exports/latest/clips"
+    assert latest_example.clip_ref == "exports/latest/clips/ann-1.mp4"
+    assert (paths.root / "exports/latest/clips/ann-1.mp4").read_bytes() == b"clip"
+    assert (paths.root / f"exports/runs/{first.export_id}/clips/ann-1.mp4").read_bytes() == b"clip"
+
+
+def test_promote_export_run_to_latest_rejects_missing_run(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+
+    try:
+        promote_export_run_to_latest(paths, "missing")
+    except FileNotFoundError as exc:
+        assert "export run manifest not found" in str(exc)
+    else:
+        raise AssertionError("missing export run should raise")
 
 
 def test_export_staleness_warnings_return_empty_without_manifest(tmp_path):

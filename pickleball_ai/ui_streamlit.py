@@ -22,6 +22,7 @@ from .exports import (
     export_run_rows,
     export_staleness_warnings,
     latest_or_legacy_export_manifest_ref,
+    promote_export_run_to_latest,
 )
 from .metrics import compute_metrics, rebuild_metrics
 from .players import default_players, load_players, players_path, write_players
@@ -769,6 +770,14 @@ def run() -> None:
             }
             selected_export = st.selectbox("View export run", list(export_options))
             st.json(export_options[selected_export])
+            if st.button("Promote to latest"):
+                promote_export_run_to_latest(
+                    state.paths,
+                    str(export_options[selected_export]["export_id"]),
+                )
+                rebuild_project_summary(state.paths)
+                st.success("Promoted export run to latest.")
+                st.rerun()
 
         clip_preview_rows = export_clip_preview_rows(state.paths, state.annotations)
         if clip_preview_rows:
