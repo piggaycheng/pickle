@@ -19,6 +19,7 @@ from .events import hit_candidates_path
 from .exports import (
     clear_export_outputs,
     export_dataset,
+    export_run_detail,
     export_run_rows,
     export_staleness_warnings,
     latest_or_legacy_export_manifest_ref,
@@ -760,7 +761,7 @@ def run() -> None:
                 st.info("No export outputs to clear.")
             st.rerun()
 
-        export_history_rows = export_run_rows(state.paths)
+        export_history_rows = export_run_rows(state.paths, state.annotations)
         if export_history_rows:
             st.subheader("Export History")
             st.dataframe(export_history_rows, use_container_width=True, hide_index=True)
@@ -769,11 +770,20 @@ def run() -> None:
                 for row in export_history_rows
             }
             selected_export = st.selectbox("View export run", list(export_options))
-            st.json(export_options[selected_export])
+            selected_export_id = str(export_options[selected_export]["export_id"])
+            export_detail = export_run_detail(state.paths, selected_export_id)
+            manifest_detail = export_detail["manifest"]
+            clip_summary = export_detail["clip_summary"]
+            detail_cols = st.columns([1, 1, 1], gap="small")
+            detail_cols[0].metric("Run examples", manifest_detail["training_examples"])
+            detail_cols[1].metric("Run clips", manifest_detail["clips"])
+            detail_cols[2].metric("Missing clips", clip_summary["missing"])
+            st.dataframe(export_detail["action_counts"], use_container_width=True, hide_index=True)
+            st.dataframe(export_detail["training_examples"], use_container_width=True, hide_index=True)
             if st.button("Promote to latest"):
                 promote_export_run_to_latest(
                     state.paths,
-                    str(export_options[selected_export]["export_id"]),
+                    selected_export_id,
                 )
                 rebuild_project_summary(state.paths)
                 st.success("Promoted export run to latest.")

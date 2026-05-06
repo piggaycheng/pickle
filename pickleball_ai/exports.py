@@ -4,6 +4,7 @@ import csv
 import os
 import shutil
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 from .annotations import load_annotations
@@ -211,11 +212,15 @@ def latest_or_legacy_export_manifest_ref(paths: ProjectPaths) -> str | None:
     return None
 
 
-def export_run_rows(paths: ProjectPaths) -> list[dict[str, object]]:
+def export_run_rows(
+    paths: ProjectPaths,
+    annotations: list[Annotation] | None = None,
+) -> list[dict[str, object]]:
     runs_dir = safe_join(paths.root, *EXPORT_RUNS_DIR_REF.split("/"))
     if not runs_dir.exists():
         return []
 
+    current = _current_export_snapshots(annotations) if annotations is not None else None
     rows: list[dict[str, object]] = []
     for run_dir in runs_dir.iterdir():
         if not run_dir.is_dir():
@@ -224,6 +229,14 @@ def export_run_rows(paths: ProjectPaths) -> list[dict[str, object]]:
         if not manifest_path.exists():
             continue
         manifest = read_json(manifest_path, ExportManifest)
+        warnings: list[str] = []
+        if current is not None:
+            examples_path = safe_join(paths.root, *manifest.training_examples_ref.split("/"))
+            if examples_path.exists():
+                exported_examples = read_jsonl(examples_path, TrainingExample)
+                warnings = _staleness_warnings_for_examples(current, exported_examples)
+            else:
+                warnings = [f"Export manifest exists, but {manifest.training_examples_ref} is missing."]
         rows.append(
             {
                 "generated_at": manifest.generated_at.isoformat(),
@@ -231,6 +244,8 @@ def export_run_rows(paths: ProjectPaths) -> list[dict[str, object]]:
                 "training_examples": manifest.training_example_count,
                 "clips": manifest.clip_count,
                 "annotations": manifest.annotation_count,
+                "status": "stale" if warnings else "fresh",
+                "stale_reasons": " | ".join(warnings),
                 "manifest_ref": export_manifest_ref(export_run_dir_ref(manifest.export_id)),
             }
         )
@@ -298,6 +313,65 @@ def promote_export_run_to_latest(paths: ProjectPaths, export_id: str) -> ExportM
     return latest_manifest
 
 
+def export_run_detail(paths: ProjectPaths, export_id: str) -> dict[str, object]:
+    run_dir_ref = export_run_dir_ref(export_id)
+    run_manifest_ref = export_manifest_ref(run_dir_ref)
+    run_manifest_path = safe_join(paths.root, *run_manifest_ref.split("/"))
+    if not run_manifest_path.exists():
+        raise FileNotFoundError(f"export run manifest not found: {run_manifest_ref}")
+
+    manifest = read_json(run_manifest_path, ExportManifest)
+    examples = read_jsonl(
+        safe_join(paths.root, *manifest.training_examples_ref.split("/")),
+        TrainingExample,
+    )
+    example_rows: list[dict[str, object]] = []
+    existing_clips = 0
+    missing_clips = 0
+    for example in examples:
+        clip_exists = False
+        if example.clip_ref is not None:
+            clip_exists = safe_join(paths.root, *example.clip_ref.split("/")).exists()
+            if clip_exists:
+                existing_clips += 1
+            else:
+                missing_clips += 1
+        example_rows.append(
+            {
+                "annotation_id": example.annotation_id,
+                "time_ms": example.event_time_ms,
+                "player": example.player_id,
+                "action": example.action,
+                "clip_ref": example.clip_ref,
+                "clip_exists": clip_exists,
+            }
+        )
+
+    action_counts = Counter(example.action for example in examples)
+    return {
+        "manifest": {
+            "export_id": manifest.export_id,
+            "generated_at": manifest.generated_at.isoformat(),
+            "training_examples": manifest.training_example_count,
+            "clips": manifest.clip_count,
+            "annotations": manifest.annotation_count,
+            "timeline_ref": manifest.timeline_ref,
+            "training_examples_ref": manifest.training_examples_ref,
+            "clips_dir_ref": manifest.clips_dir_ref,
+        },
+        "clip_summary": {
+            "expected": manifest.clip_count,
+            "existing": existing_clips,
+            "missing": missing_clips,
+        },
+        "action_counts": [
+            {"action": action, "count": count}
+            for action, count in sorted(action_counts.items())
+        ],
+        "training_examples": example_rows,
+    }
+
+
 def write_timeline_csv(path: Path, rows: list[TimelineExportRow]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.tmp")
@@ -346,11 +420,22 @@ def export_staleness_warnings(paths: ProjectPaths, annotations: list[Annotation]
     if not examples_path.exists():
         return [f"Export manifest exists, but {manifest.training_examples_ref} is missing."]
 
-    current = {
+    current = _current_export_snapshots(annotations)
+    exported_examples = read_jsonl(examples_path, TrainingExample)
+    return _staleness_warnings_for_examples(current, exported_examples)
+
+
+def _current_export_snapshots(annotations: list[Annotation]) -> dict[str, dict[str, object]]:
+    return {
         annotation.annotation_id: _annotation_export_snapshot(annotation)
         for annotation in _trusted_annotations(annotations)
     }
-    exported_examples = read_jsonl(examples_path, TrainingExample)
+
+
+def _staleness_warnings_for_examples(
+    current: dict[str, dict[str, object]],
+    exported_examples: list[TrainingExample],
+) -> list[str]:
     exported = {
         example.annotation_id: _training_example_snapshot(example)
         for example in exported_examples

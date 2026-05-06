@@ -545,6 +545,9 @@ def test_streamlit_entrypoint_exposes_export_button():
     assert "Clear export outputs" in source.run.__code__.co_consts
     assert "Export History" in source.run.__code__.co_consts
     assert "View export run" in source.run.__code__.co_consts
+    assert "Run examples" in source.run.__code__.co_consts
+    assert "Run clips" in source.run.__code__.co_consts
+    assert "Missing clips" in source.run.__code__.co_consts
     assert "Promote to latest" in source.run.__code__.co_consts
     assert "Clip extraction failed: " in source.run.__code__.co_consts
     assert "Clear to unreviewed" in source.run.__code__.co_consts

@@ -11,6 +11,7 @@ from pickleball_ai.exports import (
     clear_export_outputs,
     export_dataset,
     export_manifest_ref,
+    export_run_detail,
     export_run_dir_ref,
     export_run_rows,
     export_staleness_warnings,
@@ -293,7 +294,34 @@ def test_export_run_rows_list_runs_newest_first(tmp_path):
     assert rows[0]["clips"] == 0
     assert rows[0]["annotations"] == 2
     assert rows[0]["manifest_ref"] == f"exports/runs/{second.export_id}/export_manifest.json"
+    assert rows[0]["status"] == "fresh"
+    assert rows[0]["stale_reasons"] == ""
     assert rows[1]["training_examples"] == 1
+
+
+def test_export_run_rows_mark_stale_status_against_current_annotations(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    first = export_dataset(paths, annotations=[make_annotation("ann-1", source="manual", action="drive")])
+    second_annotations = [make_annotation("ann-1", source="manual", action="slice")]
+    second = export_dataset(paths, annotations=second_annotations)
+
+    rows = export_run_rows(paths, second_annotations)
+    rows_by_id = {str(row["export_id"]): row for row in rows}
+
+    assert rows_by_id[second.export_id]["status"] == "fresh"
+    assert rows_by_id[second.export_id]["stale_reasons"] == ""
+    assert rows_by_id[first.export_id]["status"] == "stale"
+    assert rows_by_id[first.export_id]["stale_reasons"] == (
+        "Export is stale: 1 exported example(s) differ from current annotations."
+    )
 
 
 def test_promote_export_run_to_latest_replaces_latest_outputs(tmp_path):
@@ -358,6 +386,67 @@ def test_promote_export_run_to_latest_rejects_missing_run(tmp_path):
 
     try:
         promote_export_run_to_latest(paths, "missing")
+    except FileNotFoundError as exc:
+        assert "export run manifest not found" in str(exc)
+    else:
+        raise AssertionError("missing export run should raise")
+
+
+def test_export_run_detail_summarizes_examples_actions_and_clips(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    (paths.root / "videos" / "source.mp4").write_bytes(b"fake video")
+
+    def fake_run(command, **kwargs):
+        with open(command[-1], "wb") as handle:
+            handle.write(b"clip")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    manifest = export_dataset(
+        paths,
+        annotations=[
+            make_annotation("ann-1", source="manual", action="drive"),
+            make_annotation("ann-2", source="manual", action="slice"),
+        ],
+        extract_clips=True,
+        run_command=fake_run,
+    )
+
+    detail = export_run_detail(paths, manifest.export_id)
+
+    assert detail["manifest"]["export_id"] == manifest.export_id
+    assert detail["manifest"]["training_examples"] == 2
+    assert detail["clip_summary"] == {
+        "expected": 2,
+        "existing": 2,
+        "missing": 0,
+    }
+    assert detail["action_counts"] == [
+        {"action": "drive", "count": 1},
+        {"action": "slice", "count": 1},
+    ]
+    assert detail["training_examples"][0] == {
+        "annotation_id": "ann-1",
+        "time_ms": 1000,
+        "player": "A",
+        "action": "drive",
+        "clip_ref": f"exports/runs/{manifest.export_id}/clips/ann-1.mp4",
+        "clip_exists": True,
+    }
+
+
+def test_export_run_detail_rejects_missing_run(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+
+    try:
+        export_run_detail(paths, "missing")
     except FileNotFoundError as exc:
         assert "export run manifest not found" in str(exc)
     else:
