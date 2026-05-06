@@ -16,7 +16,7 @@ from .annotations import (
 from .clips import ClipExtractionError
 from .coverage import append_coverage_event, load_coverage, rebuild_coverage
 from .events import hit_candidates_path
-from .exports import EXPORT_MANIFEST_REF, clear_export_outputs, export_dataset, export_staleness_warnings
+from .exports import clear_export_outputs, export_dataset, export_staleness_warnings, latest_or_legacy_export_manifest_ref
 from .metrics import compute_metrics, rebuild_metrics
 from .players import default_players, load_players, players_path, write_players
 from .queue import load_review_queue
@@ -299,9 +299,10 @@ def export_clip_preview_rows(
     paths: ProjectPaths,
     annotations: list[Annotation] | None = None,
 ) -> list[dict[str, object]]:
-    manifest_path = safe_join(paths.root, *EXPORT_MANIFEST_REF.split("/"))
-    if not manifest_path.exists():
+    manifest_ref = latest_or_legacy_export_manifest_ref(paths)
+    if manifest_ref is None:
         return []
+    manifest_path = safe_join(paths.root, *manifest_ref.split("/"))
     manifest = read_json(manifest_path, ExportManifest)
     if manifest.clips_dir_ref is None or manifest.clip_count == 0:
         return []

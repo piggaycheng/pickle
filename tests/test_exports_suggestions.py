@@ -10,7 +10,10 @@ from pickleball_ai.exports import (
     build_training_examples,
     clear_export_outputs,
     export_dataset,
+    export_manifest_ref,
+    export_run_dir_ref,
     export_staleness_warnings,
+    export_training_examples_ref,
 )
 from pickleball_ai.jobs import load_job_history
 from pickleball_ai.schema import (
@@ -158,12 +161,18 @@ def test_export_dataset_extracts_clips_before_writing_training_examples(tmp_path
     )
 
     assert manifest.clip_count == 1
-    assert manifest.clips_dir_ref == "exports/clips"
+    assert manifest.clips_dir_ref == "exports/latest/clips"
     assert manifest.clip_extraction_job_id is not None
     example = read_jsonl(paths.root / TRAINING_EXAMPLES_REF, TrainingExample)[0]
     assert example.video_ref == "videos/source.mp4"
-    assert example.clip_ref == "exports/clips/ann-1.mp4"
-    assert (paths.root / "exports/clips/ann-1.mp4").read_bytes() == b"clip"
+    assert example.clip_ref == "exports/latest/clips/ann-1.mp4"
+    assert (paths.root / "exports/latest/clips/ann-1.mp4").read_bytes() == b"clip"
+    run_dir_ref = export_run_dir_ref(manifest.export_id)
+    run_manifest = read_json(paths.root / export_manifest_ref(run_dir_ref), ExportManifest)
+    run_example = read_jsonl(paths.root / export_training_examples_ref(run_dir_ref), TrainingExample)[0]
+    assert run_manifest.clips_dir_ref == f"{run_dir_ref}/clips"
+    assert run_example.clip_ref == f"{run_dir_ref}/clips/ann-1.mp4"
+    assert (paths.root / f"{run_dir_ref}/clips/ann-1.mp4").read_bytes() == b"clip"
 
 
 def test_export_dataset_records_failed_clip_job_and_does_not_write_export_files(tmp_path):
@@ -232,12 +241,13 @@ def test_clear_export_outputs_removes_export_files_and_clips_only(tmp_path):
         TIMELINE_REF,
         TRAINING_EXAMPLES_REF,
         EXPORT_MANIFEST_REF,
-        "exports/clips",
+        "exports/latest/clips",
     ]
     assert not (paths.root / TIMELINE_REF).exists()
     assert not (paths.root / TRAINING_EXAMPLES_REF).exists()
     assert not (paths.root / EXPORT_MANIFEST_REF).exists()
-    assert not (paths.root / "exports/clips").exists()
+    assert not (paths.root / "exports/latest/clips").exists()
+    assert any((paths.root / "exports/runs").iterdir())
     assert artifact_file.read_text(encoding="utf-8") == "{}\n"
     assert paths.processing_jobs_jsonl.exists()
 
@@ -329,7 +339,7 @@ def test_export_staleness_warnings_detect_missing_training_examples(tmp_path):
     (paths.root / TRAINING_EXAMPLES_REF).unlink()
 
     assert export_staleness_warnings(paths, [make_annotation("ann-1", source="manual")]) == [
-        "Export manifest exists, but exports/training_examples.jsonl is missing.",
+        "Export manifest exists, but exports/latest/training_examples.jsonl is missing.",
     ]
 
 

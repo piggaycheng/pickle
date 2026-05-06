@@ -17,8 +17,8 @@ class ClipExtractionError(RuntimeError):
     pass
 
 
-def clip_ref_for_annotation(annotation: Annotation) -> str:
-    return f"{CLIPS_DIR_REF}/{annotation.annotation_id}.mp4"
+def clip_ref_for_annotation(annotation: Annotation, *, clips_dir_ref: str = CLIPS_DIR_REF) -> str:
+    return f"{clips_dir_ref}/{annotation.annotation_id}.mp4"
 
 
 def build_ffmpeg_clip_command(
@@ -52,6 +52,7 @@ def extract_clip(
     *,
     annotation: Annotation,
     source_video_ref: str,
+    clips_dir_ref: str = CLIPS_DIR_REF,
     ffmpeg_path: str = "ffmpeg",
     run_command: CommandRunner = subprocess.run,
 ) -> str:
@@ -59,7 +60,7 @@ def extract_clip(
     if not source_path.exists():
         raise ClipExtractionError(f"source video not found: {source_video_ref}")
 
-    clip_ref = clip_ref_for_annotation(annotation)
+    clip_ref = clip_ref_for_annotation(annotation, clips_dir_ref=clips_dir_ref)
     output_path = safe_join(paths.root, *clip_ref.split("/"))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     command = build_ffmpeg_clip_command(
@@ -87,6 +88,7 @@ def extract_clips(
     *,
     annotations: Iterable[Annotation],
     source_video_ref: str,
+    clips_dir_ref: str = CLIPS_DIR_REF,
     ffmpeg_path: str = "ffmpeg",
     run_command: CommandRunner = subprocess.run,
 ) -> list[str]:
@@ -95,6 +97,7 @@ def extract_clips(
             paths,
             annotation=annotation,
             source_video_ref=source_video_ref,
+            clips_dir_ref=clips_dir_ref,
             ffmpeg_path=ffmpeg_path,
             run_command=run_command,
         )
@@ -108,6 +111,7 @@ def extract_clips_job(
     video_id: str,
     source_video_ref: str,
     annotations: Iterable[Annotation],
+    clips_dir_ref: str = CLIPS_DIR_REF,
     ffmpeg_path: str = "ffmpeg",
     run_command: CommandRunner = subprocess.run,
 ) -> ProcessingJob:
@@ -119,7 +123,7 @@ def extract_clips_job(
         input_refs=[source_video_ref],
         params={
             "annotation_count": len(annotation_list),
-            "clips_dir_ref": CLIPS_DIR_REF,
+            "clips_dir_ref": clips_dir_ref,
             "ffmpeg_path": ffmpeg_path,
         },
     )
@@ -131,6 +135,7 @@ def extract_clips_job(
             paths,
             annotations=annotation_list,
             source_video_ref=source_video_ref,
+            clips_dir_ref=clips_dir_ref,
             ffmpeg_path=ffmpeg_path,
             run_command=run_command,
         )
