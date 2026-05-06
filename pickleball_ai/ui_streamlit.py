@@ -16,7 +16,7 @@ from .annotations import (
 from .clips import ClipExtractionError
 from .coverage import append_coverage_event, load_coverage, rebuild_coverage
 from .events import hit_candidates_path
-from .exports import EXPORT_MANIFEST_REF, clear_export_outputs, export_dataset
+from .exports import EXPORT_MANIFEST_REF, clear_export_outputs, export_dataset, export_staleness_warnings
 from .metrics import compute_metrics, rebuild_metrics
 from .players import default_players, load_players, players_path, write_players
 from .queue import load_review_queue
@@ -721,6 +721,11 @@ def run() -> None:
             for warning in export_warnings:
                 st.write(f"- {warning}")
             export_anyway = st.checkbox("Export anyway")
+        stale_export_warnings = export_staleness_warnings(state.paths, state.annotations)
+        if stale_export_warnings:
+            st.warning("Export is stale. Re-export to refresh training_examples.jsonl.")
+            for warning in stale_export_warnings:
+                st.write(f"- {warning}")
         extract_export_clips = st.checkbox("Extract clips with ffmpeg")
         if st.button("Export Dataset", disabled=bool(export_warnings and not export_anyway)):
             try:

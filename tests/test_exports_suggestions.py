@@ -10,6 +10,7 @@ from pickleball_ai.exports import (
     build_training_examples,
     clear_export_outputs,
     export_dataset,
+    export_staleness_warnings,
 )
 from pickleball_ai.jobs import load_job_history
 from pickleball_ai.schema import (
@@ -245,6 +246,91 @@ def test_clear_export_outputs_noops_without_existing_exports(tmp_path):
     paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
 
     assert clear_export_outputs(paths) == []
+
+
+def test_export_staleness_warnings_return_empty_without_manifest(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+
+    assert export_staleness_warnings(paths, [make_annotation("ann-1")]) == []
+
+
+def test_export_staleness_warnings_return_empty_when_current_annotations_match(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    annotations = [make_annotation("ann-1", source="manual")]
+    export_dataset(paths, annotations=annotations)
+
+    assert export_staleness_warnings(paths, annotations) == []
+
+
+def test_export_staleness_warnings_detect_changed_annotation_fields(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    export_dataset(paths, annotations=[make_annotation("ann-1", source="manual", action="drive")])
+
+    warnings = export_staleness_warnings(
+        paths,
+        [make_annotation("ann-1", source="manual", action="slice")],
+    )
+
+    assert warnings == [
+        "Export is stale: 1 exported example(s) differ from current annotations.",
+    ]
+
+
+def test_export_staleness_warnings_detect_added_and_removed_annotations(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    export_dataset(paths, annotations=[make_annotation("ann-1", source="manual")])
+
+    warnings = export_staleness_warnings(
+        paths,
+        [make_annotation("ann-2", source="manual")],
+    )
+
+    assert warnings == [
+        "Export is stale: 1 trusted annotation(s) are not exported.",
+        "Export is stale: 1 exported example(s) no longer have trusted annotations.",
+    ]
+
+
+def test_export_staleness_warnings_detect_missing_training_examples(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    export_dataset(paths, annotations=[make_annotation("ann-1", source="manual")])
+    (paths.root / TRAINING_EXAMPLES_REF).unlink()
+
+    assert export_staleness_warnings(paths, [make_annotation("ann-1", source="manual")]) == [
+        "Export manifest exists, but exports/training_examples.jsonl is missing.",
+    ]
 
 
 def test_model_suggestions_round_trip_separately_from_annotations(tmp_path):

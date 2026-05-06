@@ -24,7 +24,7 @@ from .schema import (
     Video,
     stable_id,
 )
-from .storage import ProjectPaths, read_json, safe_join, write_json, write_jsonl
+from .storage import ProjectPaths, read_json, read_jsonl, safe_join, write_json, write_jsonl
 
 TIMELINE_REF = "exports/timeline.csv"
 TRAINING_EXAMPLES_REF = "exports/training_examples.jsonl"
@@ -176,6 +176,85 @@ def clear_export_outputs(paths: ProjectPaths) -> list[str]:
         shutil.rmtree(clips_dir)
         removed_refs.append(CLIPS_DIR_REF)
     return removed_refs
+
+
+def export_staleness_warnings(paths: ProjectPaths, annotations: list[Annotation]) -> list[str]:
+    manifest_path = safe_join(paths.root, *EXPORT_MANIFEST_REF.split("/"))
+    if not manifest_path.exists():
+        return []
+
+    manifest = read_json(manifest_path, ExportManifest)
+    examples_path = safe_join(paths.root, *manifest.training_examples_ref.split("/"))
+    if not examples_path.exists():
+        return [f"Export manifest exists, but {manifest.training_examples_ref} is missing."]
+
+    current = {
+        annotation.annotation_id: _annotation_export_snapshot(annotation)
+        for annotation in _trusted_annotations(annotations)
+    }
+    exported_examples = read_jsonl(examples_path, TrainingExample)
+    exported = {
+        example.annotation_id: _training_example_snapshot(example)
+        for example in exported_examples
+    }
+
+    warnings: list[str] = []
+    missing_from_export = sorted(set(current) - set(exported))
+    if missing_from_export:
+        warnings.append(
+            f"Export is stale: {len(missing_from_export)} trusted annotation(s) are not exported."
+        )
+
+    removed_from_current = sorted(set(exported) - set(current))
+    if removed_from_current:
+        warnings.append(
+            f"Export is stale: {len(removed_from_current)} exported example(s) no longer have trusted annotations."
+        )
+
+    changed = sorted(
+        annotation_id
+        for annotation_id in set(current) & set(exported)
+        if current[annotation_id] != exported[annotation_id]
+    )
+    if changed:
+        warnings.append(
+            f"Export is stale: {len(changed)} exported example(s) differ from current annotations."
+        )
+    return warnings
+
+
+def _annotation_export_snapshot(annotation: Annotation) -> dict[str, object]:
+    return {
+        "annotation_id": annotation.annotation_id,
+        "video_id": annotation.video_id,
+        "player_id": annotation.player_id,
+        "action": annotation.action,
+        "event_time_ms": annotation.event_time_ms,
+        "clip_start_ms": annotation.clip_start_ms,
+        "clip_end_ms": annotation.clip_end_ms,
+        "timing_confidence": annotation.timing_confidence,
+        "bbox": annotation.bbox,
+        "pose_landmarks_ref": annotation.pose_landmarks_ref,
+        "source_tool": annotation.source_tool,
+        "external_refs": annotation.external_refs,
+    }
+
+
+def _training_example_snapshot(example: TrainingExample) -> dict[str, object]:
+    return {
+        "annotation_id": example.annotation_id,
+        "video_id": example.video_id,
+        "player_id": example.player_id,
+        "action": example.action,
+        "event_time_ms": example.event_time_ms,
+        "clip_start_ms": example.clip_start_ms,
+        "clip_end_ms": example.clip_end_ms,
+        "timing_confidence": example.timing_confidence,
+        "bbox": example.bbox,
+        "pose_landmarks_ref": example.pose_landmarks_ref,
+        "source_tool": example.source_tool,
+        "external_refs": example.external_refs,
+    }
 
 
 def _trusted_annotations(annotations: list[Annotation]) -> list[Annotation]:
