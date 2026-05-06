@@ -60,6 +60,25 @@ $env:PICKLE_DATA_DIR = "D:\\path\\to\\datasets"
 uv run streamlit run streamlit_app.py
 ```
 
+## Dataset Export Outputs
+
+在 Streamlit UI 裡按 `Export Dataset` 會把目前可信任的 annotations 輸出到：
+
+```text
+datasets/<project-id>/exports/
+```
+
+主要輸出包含：
+
+- `exports/timeline.csv`：給人看的標註時間軸。
+- `exports/training_examples.jsonl`：給模型訓練用的 structured metadata。
+- `exports/export_manifest.json`：這次 export 的摘要。
+- `exports/clips/`：只有勾選 `Extract clips with ffmpeg` 時才會產生，內含每筆 annotation 對應的短影片片段。
+
+若要清掉舊 export，在 UI 裡按 `Clear export outputs`。這只會刪除 `exports/` 底下的 export outputs 和 clips，不會刪除 `artifacts/`。
+
+`artifacts/` 保留 replayable jobs 的來源紀錄和中間結果，例如 pose extraction、hit candidates、job manifests。這些資料用來 debug、重建 queue、追蹤資料來源；清除 export 不應該破壞它們。
+
 ## Other Useful Commands
 
 下載 YouTube 影片：
