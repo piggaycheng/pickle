@@ -9,6 +9,7 @@ from pickleball_ai.exports import (
     build_timeline_rows,
     build_training_examples,
     clear_export_outputs,
+    compare_export_runs,
     export_dataset,
     export_manifest_ref,
     export_run_detail,
@@ -447,6 +448,80 @@ def test_export_run_detail_rejects_missing_run(tmp_path):
 
     try:
         export_run_detail(paths, "missing")
+    except FileNotFoundError as exc:
+        assert "export run manifest not found" in str(exc)
+    else:
+        raise AssertionError("missing export run should raise")
+
+
+def test_compare_export_runs_reports_added_removed_changed_and_action_delta(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+    base = export_dataset(
+        paths,
+        annotations=[
+            make_annotation("ann-1", source="manual", action="drive"),
+            make_annotation("ann-2", source="manual", action="slice"),
+        ],
+    )
+    compare = export_dataset(
+        paths,
+        annotations=[
+            make_annotation("ann-1", source="manual", action="volley"),
+            make_annotation("ann-3", source="manual", action="dink"),
+        ],
+    )
+
+    diff = compare_export_runs(
+        paths,
+        base_export_id=base.export_id,
+        compare_export_id=compare.export_id,
+    )
+
+    assert diff["added_count"] == 1
+    assert diff["removed_count"] == 1
+    assert diff["changed_count"] == 1
+    assert diff["added_examples"] == [
+        {
+            "annotation_id": "ann-3",
+            "time_ms": 1000,
+            "player": "A",
+            "action": "dink",
+            "clip_ref": None,
+        }
+    ]
+    assert diff["removed_examples"] == [
+        {
+            "annotation_id": "ann-2",
+            "time_ms": 1000,
+            "player": "A",
+            "action": "slice",
+            "clip_ref": None,
+        }
+    ]
+    assert diff["changed_examples"][0]["annotation_id"] == "ann-1"
+    assert diff["changed_examples"][0]["base"]["action"] == "drive"
+    assert diff["changed_examples"][0]["compare"]["action"] == "volley"
+    assert diff["action_delta"] == [
+        {"action": "dink", "base": 0, "compare": 1, "delta": 1},
+        {"action": "drive", "base": 1, "compare": 0, "delta": -1},
+        {"action": "slice", "base": 1, "compare": 0, "delta": -1},
+        {"action": "volley", "base": 0, "compare": 1, "delta": 1},
+    ]
+
+
+def test_compare_export_runs_rejects_missing_run(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+
+    try:
+        compare_export_runs(paths, base_export_id="missing", compare_export_id="also-missing")
     except FileNotFoundError as exc:
         assert "export run manifest not found" in str(exc)
     else:

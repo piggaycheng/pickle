@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime, timezone
 
 from .schema import (
     CoverageSpan,
@@ -14,6 +15,8 @@ from .schema import (
     stable_id,
 )
 from .storage import ProjectPaths, read_jsonl, write_jsonl
+
+MATERIALIZED_CREATED_AT = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 def review_queue_path(paths: ProjectPaths):
@@ -146,9 +149,8 @@ def _reuse_or_create(
             if existing
             else None
         ),
+        "created_at": existing.created_at if existing else MATERIALIZED_CREATED_AT,
     }
-    if existing:
-        data["created_at"] = existing.created_at
     return ReviewQueueItem(**data)
 
 

@@ -372,6 +372,69 @@ def export_run_detail(paths: ProjectPaths, export_id: str) -> dict[str, object]:
     }
 
 
+def compare_export_runs(
+    paths: ProjectPaths,
+    *,
+    base_export_id: str,
+    compare_export_id: str,
+) -> dict[str, object]:
+    base_examples = _load_export_run_examples(paths, base_export_id)
+    compare_examples = _load_export_run_examples(paths, compare_export_id)
+    base_by_id = {
+        example.annotation_id: _training_example_snapshot(example)
+        for example in base_examples
+    }
+    compare_by_id = {
+        example.annotation_id: _training_example_snapshot(example)
+        for example in compare_examples
+    }
+    base_display_by_id = {
+        example.annotation_id: _training_example_diff_snapshot(example)
+        for example in base_examples
+    }
+    compare_display_by_id = {
+        example.annotation_id: _training_example_diff_snapshot(example)
+        for example in compare_examples
+    }
+
+    added_ids = sorted(set(compare_by_id) - set(base_by_id))
+    removed_ids = sorted(set(base_by_id) - set(compare_by_id))
+    changed_ids = sorted(
+        annotation_id
+        for annotation_id in set(base_by_id) & set(compare_by_id)
+        if base_by_id[annotation_id] != compare_by_id[annotation_id]
+    )
+    base_action_counts = Counter(example.action for example in base_examples)
+    compare_action_counts = Counter(example.action for example in compare_examples)
+    action_delta = [
+        {
+            "action": action,
+            "base": base_action_counts[action],
+            "compare": compare_action_counts[action],
+            "delta": compare_action_counts[action] - base_action_counts[action],
+        }
+        for action in sorted(set(base_action_counts) | set(compare_action_counts))
+    ]
+    return {
+        "base_export_id": base_export_id,
+        "compare_export_id": compare_export_id,
+        "added_count": len(added_ids),
+        "removed_count": len(removed_ids),
+        "changed_count": len(changed_ids),
+        "added_examples": [_diff_example_row(compare_display_by_id[annotation_id]) for annotation_id in added_ids],
+        "removed_examples": [_diff_example_row(base_display_by_id[annotation_id]) for annotation_id in removed_ids],
+        "changed_examples": [
+            {
+                "annotation_id": annotation_id,
+                "base": _diff_example_row(base_display_by_id[annotation_id]),
+                "compare": _diff_example_row(compare_display_by_id[annotation_id]),
+            }
+            for annotation_id in changed_ids
+        ],
+        "action_delta": action_delta,
+    }
+
+
 def write_timeline_csv(path: Path, rows: list[TimelineExportRow]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.tmp")
@@ -483,6 +546,28 @@ def _remove_ref(paths: ProjectPaths, ref: str) -> bool:
     return True
 
 
+def _load_export_run_examples(paths: ProjectPaths, export_id: str) -> list[TrainingExample]:
+    run_dir_ref = export_run_dir_ref(export_id)
+    manifest_path = safe_join(paths.root, *export_manifest_ref(run_dir_ref).split("/"))
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"export run manifest not found: {export_manifest_ref(run_dir_ref)}")
+    manifest = read_json(manifest_path, ExportManifest)
+    return read_jsonl(
+        safe_join(paths.root, *manifest.training_examples_ref.split("/")),
+        TrainingExample,
+    )
+
+
+def _diff_example_row(snapshot: dict[str, object]) -> dict[str, object]:
+    return {
+        "annotation_id": snapshot["annotation_id"],
+        "time_ms": snapshot["event_time_ms"],
+        "player": snapshot["player_id"],
+        "action": snapshot["action"],
+        "clip_ref": snapshot["clip_ref"],
+    }
+
+
 def _annotation_export_snapshot(annotation: Annotation) -> dict[str, object]:
     return {
         "annotation_id": annotation.annotation_id,
@@ -515,6 +600,12 @@ def _training_example_snapshot(example: TrainingExample) -> dict[str, object]:
         "source_tool": example.source_tool,
         "external_refs": example.external_refs,
     }
+
+
+def _training_example_diff_snapshot(example: TrainingExample) -> dict[str, object]:
+    snapshot = _training_example_snapshot(example)
+    snapshot["clip_ref"] = example.clip_ref
+    return snapshot
 
 
 def _trusted_annotations(annotations: list[Annotation]) -> list[Annotation]:

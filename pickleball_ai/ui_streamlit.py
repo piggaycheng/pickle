@@ -18,6 +18,7 @@ from .coverage import append_coverage_event, load_coverage, rebuild_coverage
 from .events import hit_candidates_path
 from .exports import (
     clear_export_outputs,
+    compare_export_runs,
     export_dataset,
     export_run_detail,
     export_run_rows,
@@ -788,6 +789,28 @@ def run() -> None:
                 rebuild_project_summary(state.paths)
                 st.success("Promoted export run to latest.")
                 st.rerun()
+            if len(export_options) >= 2:
+                st.subheader("Export Diff")
+                base_export = st.selectbox("Base export run", list(export_options), key="export_diff_base")
+                compare_export = st.selectbox(
+                    "Compare export run",
+                    list(export_options),
+                    key="export_diff_compare",
+                )
+                if base_export != compare_export:
+                    diff = compare_export_runs(
+                        state.paths,
+                        base_export_id=str(export_options[base_export]["export_id"]),
+                        compare_export_id=str(export_options[compare_export]["export_id"]),
+                    )
+                    diff_cols = st.columns([1, 1, 1], gap="small")
+                    diff_cols[0].metric("Added", diff["added_count"])
+                    diff_cols[1].metric("Removed", diff["removed_count"])
+                    diff_cols[2].metric("Changed", diff["changed_count"])
+                    st.dataframe(diff["action_delta"], use_container_width=True, hide_index=True)
+                    st.dataframe(diff["added_examples"], use_container_width=True, hide_index=True)
+                    st.dataframe(diff["removed_examples"], use_container_width=True, hide_index=True)
+                    st.dataframe(diff["changed_examples"], use_container_width=True, hide_index=True)
 
         clip_preview_rows = export_clip_preview_rows(state.paths, state.annotations)
         if clip_preview_rows:
