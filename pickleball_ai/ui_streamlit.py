@@ -16,7 +16,13 @@ from .annotations import (
 from .clips import ClipExtractionError
 from .coverage import append_coverage_event, load_coverage, rebuild_coverage
 from .events import hit_candidates_path
-from .exports import clear_export_outputs, export_dataset, export_staleness_warnings, latest_or_legacy_export_manifest_ref
+from .exports import (
+    clear_export_outputs,
+    export_dataset,
+    export_run_rows,
+    export_staleness_warnings,
+    latest_or_legacy_export_manifest_ref,
+)
 from .metrics import compute_metrics, rebuild_metrics
 from .players import default_players, load_players, players_path, write_players
 from .queue import load_review_queue
@@ -752,6 +758,17 @@ def run() -> None:
             else:
                 st.info("No export outputs to clear.")
             st.rerun()
+
+        export_history_rows = export_run_rows(state.paths)
+        if export_history_rows:
+            st.subheader("Export History")
+            st.dataframe(export_history_rows, use_container_width=True, hide_index=True)
+            export_options = {
+                f"{row['generated_at']} | {row['training_examples']} examples | {row['clips']} clips": row
+                for row in export_history_rows
+            }
+            selected_export = st.selectbox("View export run", list(export_options))
+            st.json(export_options[selected_export])
 
         clip_preview_rows = export_clip_preview_rows(state.paths, state.annotations)
         if clip_preview_rows:

@@ -76,7 +76,7 @@ datasets/<project-id>/exports/
 - `exports/latest/clips/`：只有勾選 `Extract clips with ffmpeg` 時才會產生，內含每筆 annotation 對應的短影片片段。
 - `exports/runs/<export-id>/`：每次 export 的歷史版本，方便之後比較不同資料集輸出。
 
-UI 會讀 `exports/latest/` 來顯示 `Exported Clips`。若要清掉目前 UI 顯示的 export，在 UI 裡按 `Clear export outputs`。這會刪除 `exports/latest/` 的 outputs 和舊版 root-level export outputs，但會保留 `exports/runs/` 的歷史版本，也不會刪除 `artifacts/`。
+UI 會讀 `exports/latest/` 來顯示 `Exported Clips`，並用 read-only 的 `Export History` 面板列出 `exports/runs/` 裡的歷史版本。若要清掉目前 UI 顯示的 export，在 UI 裡按 `Clear export outputs`。這會刪除 `exports/latest/` 的 outputs 和舊版 root-level export outputs，但會保留 `exports/runs/` 的歷史版本，也不會刪除 `artifacts/`。
 
 `artifacts/` 保留 replayable jobs 的來源紀錄和中間結果，例如 pose extraction、hit candidates、job manifests。這些資料用來 debug、重建 queue、追蹤資料來源；清除 export 不應該破壞它們。
 

@@ -12,6 +12,7 @@ from pickleball_ai.exports import (
     export_dataset,
     export_manifest_ref,
     export_run_dir_ref,
+    export_run_rows,
     export_staleness_warnings,
     export_training_examples_ref,
 )
@@ -256,6 +257,42 @@ def test_clear_export_outputs_noops_without_existing_exports(tmp_path):
     paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
 
     assert clear_export_outputs(paths) == []
+
+
+def test_export_run_rows_return_empty_without_runs(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+
+    assert export_run_rows(paths) == []
+
+
+def test_export_run_rows_list_runs_newest_first(tmp_path):
+    project = Project(project_id="project-1", video_id="video-1")
+    video = Video(
+        video_id="video-1",
+        source_type=SourceType.LOCAL,
+        local_path="videos/source.mp4",
+        fps=30,
+        duration_ms=2000,
+    )
+    paths = create_project_layout(tmp_path, project, video)
+
+    first = export_dataset(paths, annotations=[make_annotation("ann-1", source="manual")])
+    second = export_dataset(
+        paths,
+        annotations=[
+            make_annotation("ann-1", source="manual"),
+            make_annotation("ann-2", source="manual"),
+        ],
+    )
+
+    rows = export_run_rows(paths)
+
+    assert [row["export_id"] for row in rows] == [second.export_id, first.export_id]
+    assert rows[0]["training_examples"] == 2
+    assert rows[0]["clips"] == 0
+    assert rows[0]["annotations"] == 2
+    assert rows[0]["manifest_ref"] == f"exports/runs/{second.export_id}/export_manifest.json"
+    assert rows[1]["training_examples"] == 1
 
 
 def test_export_staleness_warnings_return_empty_without_manifest(tmp_path):

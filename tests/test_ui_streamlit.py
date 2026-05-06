@@ -543,5 +543,7 @@ def test_streamlit_entrypoint_exposes_export_button():
     assert "Extract clips with ffmpeg" in source.run.__code__.co_consts
     assert "Export is stale. Re-export to refresh training_examples.jsonl." in source.run.__code__.co_consts
     assert "Clear export outputs" in source.run.__code__.co_consts
+    assert "Export History" in source.run.__code__.co_consts
+    assert "View export run" in source.run.__code__.co_consts
     assert "Clip extraction failed: " in source.run.__code__.co_consts
     assert "Clear to unreviewed" in source.run.__code__.co_consts

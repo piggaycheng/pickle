@@ -211,6 +211,32 @@ def latest_or_legacy_export_manifest_ref(paths: ProjectPaths) -> str | None:
     return None
 
 
+def export_run_rows(paths: ProjectPaths) -> list[dict[str, object]]:
+    runs_dir = safe_join(paths.root, *EXPORT_RUNS_DIR_REF.split("/"))
+    if not runs_dir.exists():
+        return []
+
+    rows: list[dict[str, object]] = []
+    for run_dir in runs_dir.iterdir():
+        if not run_dir.is_dir():
+            continue
+        manifest_path = run_dir / "export_manifest.json"
+        if not manifest_path.exists():
+            continue
+        manifest = read_json(manifest_path, ExportManifest)
+        rows.append(
+            {
+                "generated_at": manifest.generated_at.isoformat(),
+                "export_id": manifest.export_id,
+                "training_examples": manifest.training_example_count,
+                "clips": manifest.clip_count,
+                "annotations": manifest.annotation_count,
+                "manifest_ref": export_manifest_ref(export_run_dir_ref(manifest.export_id)),
+            }
+        )
+    return sorted(rows, key=lambda row: str(row["generated_at"]), reverse=True)
+
+
 def write_timeline_csv(path: Path, rows: list[TimelineExportRow]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.tmp")
