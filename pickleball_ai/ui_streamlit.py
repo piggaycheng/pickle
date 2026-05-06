@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -189,6 +190,145 @@ def export_precheck_warnings(
         warnings.append(f"{len(open_queue_items)} unresolved review queue item(s).")
 
     return warnings
+
+
+def training_readiness_report(
+    paths: ProjectPaths,
+    *,
+    annotations: list[Annotation],
+    coverage: list[CoverageSpan],
+    queue_items: list[ReviewQueueItem],
+    minimum_examples_per_action: int = 20,
+    action_labels: list[str] | None = None,
+) -> dict[str, object]:
+    labels = action_labels if action_labels is not None else ACTION_LABELS
+    trainable_labels = [label for label in labels if label != "unknown"]
+    trusted_annotations = [
+        annotation
+        for annotation in annotations
+        if annotation.source != "model_suggestion"
+    ]
+    trusted_counts = Counter(annotation.action for annotation in trusted_annotations)
+
+    manifest_ref = latest_or_legacy_export_manifest_ref(paths)
+    exported_examples: list[TrainingExample] = []
+    manifest_status = "missing"
+    if manifest_ref is not None:
+        manifest_path = safe_join(paths.root, *manifest_ref.split("/"))
+        manifest = read_json(manifest_path, ExportManifest)
+        examples_path = safe_join(paths.root, *manifest.training_examples_ref.split("/"))
+        if examples_path.exists():
+            exported_examples = read_jsonl(examples_path, TrainingExample)
+            manifest_status = "present"
+        else:
+            manifest_status = "missing_training_examples"
+
+    exported_counts = Counter(example.action for example in exported_examples)
+    existing_clip_counts: Counter[str] = Counter()
+    missing_clip_counts: Counter[str] = Counter()
+    for example in exported_examples:
+        if example.clip_ref is None:
+            missing_clip_counts[example.action] += 1
+            continue
+        clip_path = safe_join(paths.root, *example.clip_ref.split("/"))
+        if clip_path.exists():
+            existing_clip_counts[example.action] += 1
+        else:
+            missing_clip_counts[example.action] += 1
+
+    action_rows: list[dict[str, object]] = []
+    for label in trainable_labels:
+        trusted_count = trusted_counts[label]
+        exported_count = exported_counts[label]
+        existing_clips = existing_clip_counts[label]
+        missing_clips = missing_clip_counts[label]
+        needed = max(0, minimum_examples_per_action - trusted_count)
+        if trusted_count == 0:
+            status = "missing"
+        elif missing_clips:
+            status = "blocked_missing_clips"
+        elif trusted_count < minimum_examples_per_action:
+            status = "needs_examples"
+        else:
+            status = "ready"
+        action_rows.append(
+            {
+                "action": label,
+                "trusted_annotations": trusted_count,
+                "exported_examples": exported_count,
+                "existing_clips": existing_clips,
+                "missing_clips": missing_clips,
+                "minimum_examples": minimum_examples_per_action,
+                "needed_for_minimum": needed,
+                "status": status,
+            }
+        )
+
+    coverage_gaps = [span for span in coverage if span.state == CoverageState.UNREVIEWED]
+    open_queue_items = [item for item in queue_items if item.status == QueueStatus.OPEN]
+    duplicate_pairs = _duplicate_annotation_pairs(trusted_annotations)
+    stale_warnings = export_staleness_warnings(paths, annotations)
+    unknown_count = trusted_counts["unknown"]
+    missing_clip_count = sum(missing_clip_counts.values())
+    ready_actions = [
+        row
+        for row in action_rows
+        if row["status"] == "ready"
+    ]
+
+    blockers: list[str] = []
+    improvements: list[str] = []
+    if not trusted_annotations:
+        blockers.append("No trusted annotations yet.")
+    if manifest_status == "missing":
+        blockers.append("No latest export found.")
+    elif manifest_status == "missing_training_examples":
+        blockers.append("Export manifest exists, but training examples are missing.")
+    if stale_warnings:
+        blockers.extend(stale_warnings)
+    if missing_clip_count:
+        blockers.append(f"{missing_clip_count} exported training example(s) are missing clips.")
+    if unknown_count:
+        blockers.append(f"{unknown_count} trusted annotation(s) still use unknown action.")
+    if duplicate_pairs:
+        blockers.append(
+            f"{len(duplicate_pairs)} possible duplicate annotation pair(s) within "
+            f"{DUPLICATE_TOLERANCE_MS}ms."
+        )
+    if coverage_gaps:
+        gap_duration_ms = sum(span.end_ms - span.start_ms for span in coverage_gaps)
+        blockers.append(f"{len(coverage_gaps)} coverage gap(s), {gap_duration_ms}ms unreviewed.")
+    if open_queue_items:
+        blockers.append(f"{len(open_queue_items)} unresolved review queue item(s).")
+    if len(ready_actions) < 2:
+        improvements.append(
+            f"Need at least 2 actions with {minimum_examples_per_action}+ examples; "
+            f"{len(ready_actions)} ready now."
+        )
+
+    if blockers:
+        readiness = "Not ready"
+    elif improvements:
+        readiness = "Almost ready"
+    else:
+        readiness = "Ready for baseline"
+
+    return {
+        "readiness": readiness,
+        "minimum_examples_per_action": minimum_examples_per_action,
+        "trusted_annotation_count": len(trusted_annotations),
+        "exported_example_count": len(exported_examples),
+        "ready_action_count": len(ready_actions),
+        "unknown_count": unknown_count,
+        "duplicate_pair_count": len(duplicate_pairs),
+        "coverage_gap_count": len(coverage_gaps),
+        "open_queue_count": len(open_queue_items),
+        "missing_clip_count": missing_clip_count,
+        "export_status": "stale" if stale_warnings else manifest_status,
+        "blockers": blockers,
+        "improvements": improvements,
+        "action_rows": action_rows,
+    }
 
 
 def _duplicate_annotation_pairs(annotations: list[Annotation]) -> list[tuple[Annotation, Annotation]]:
@@ -720,6 +860,29 @@ def run() -> None:
         st.metric("Jobs", summary.job_count)
         st.metric("Failed jobs", len(summary.failed_jobs))
         st.metric("Artifacts", summary.artifact_count)
+        readiness = training_readiness_report(
+            state.paths,
+            annotations=state.annotations,
+            coverage=state.coverage,
+            queue_items=state.queue_items,
+        )
+        st.subheader("Training Readiness")
+        readiness_cols = st.columns([1, 1, 1], gap="small")
+        readiness_cols[0].metric("Readiness", readiness["readiness"])
+        readiness_cols[1].metric("Ready actions", readiness["ready_action_count"])
+        readiness_cols[2].metric("Missing clips", readiness["missing_clip_count"])
+        if readiness["blockers"]:
+            st.warning("Training blockers found.")
+            for blocker in readiness["blockers"]:
+                st.write(f"- {blocker}")
+        elif readiness["improvements"]:
+            st.info("Training is close, but needs more labeled clips.")
+            for improvement in readiness["improvements"]:
+                st.write(f"- {improvement}")
+        else:
+            st.success("Ready for a baseline training run.")
+        st.dataframe(readiness["action_rows"], use_container_width=True, hide_index=True)
+
         export_warnings = export_precheck_warnings(
             annotations=state.annotations,
             coverage=state.coverage,

@@ -39,6 +39,7 @@ from pickleball_ai.ui_streamlit import (
     mark_coverage,
     queue_item_defaults,
     queue_rows,
+    training_readiness_report,
     update_queue_item_status,
 )
 from pickleball_ai.events import hit_candidates_path
@@ -536,6 +537,138 @@ def test_export_precheck_warns_about_dataset_quality_issues(tmp_path):
     ]
 
 
+def test_training_readiness_report_flags_training_blockers(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1000,
+        player_id="A",
+        action="unknown",
+    )
+    add_manual_annotation(
+        paths,
+        video_id="video-1",
+        event_time_ms=1200,
+        player_id="A",
+        action="unknown",
+    )
+    mark_coverage(paths, start_ms=0, end_ms=1000, state=CoverageState.UNREVIEWED)
+    item = ReviewQueueItem(
+        reason=QueueReason.COVERAGE_GAP,
+        target_ref=TargetRef(type="coverage_span", id="0-1000"),
+        status=QueueStatus.OPEN,
+        priority=60,
+    )
+
+    report = training_readiness_report(
+        paths,
+        annotations=load_annotations(paths),
+        coverage=load_coverage(paths),
+        queue_items=[item],
+        minimum_examples_per_action=2,
+    )
+
+    assert report["readiness"] == "Not ready"
+    assert report["export_status"] == "missing"
+    assert report["unknown_count"] == 2
+    assert report["duplicate_pair_count"] == 1
+    assert report["coverage_gap_count"] == 1
+    assert report["open_queue_count"] == 1
+    assert report["blockers"] == [
+        "No latest export found.",
+        "2 trusted annotation(s) still use unknown action.",
+        "1 possible duplicate annotation pair(s) within 300ms.",
+        "1 coverage gap(s), 1000ms unreviewed.",
+        "1 unresolved review queue item(s).",
+    ]
+
+
+def test_training_readiness_report_ready_when_two_actions_have_clips(tmp_path):
+    paths = create_project_layout(tmp_path, Project(project_id="project-1", video_id="video-1"))
+    annotations = [
+        add_manual_annotation(
+            paths,
+            video_id="video-1",
+            event_time_ms=1000,
+            player_id="A",
+            action="drive",
+        ),
+        add_manual_annotation(
+            paths,
+            video_id="video-1",
+            event_time_ms=2000,
+            player_id="A",
+            action="drive",
+        ),
+        add_manual_annotation(
+            paths,
+            video_id="video-1",
+            event_time_ms=3000,
+            player_id="B",
+            action="slice",
+        ),
+        add_manual_annotation(
+            paths,
+            video_id="video-1",
+            event_time_ms=4000,
+            player_id="B",
+            action="slice",
+        ),
+    ]
+    examples = [
+        TrainingExample(
+            example_id=f"example-{annotation.annotation_id}",
+            annotation_id=annotation.annotation_id,
+            video_id=annotation.video_id,
+            video_ref="videos/source.mp4",
+            clip_ref=f"exports/latest/clips/{annotation.annotation_id}.mp4",
+            player_id=annotation.player_id,
+            action=annotation.action,
+            event_time_ms=annotation.event_time_ms,
+            clip_start_ms=annotation.clip_start_ms,
+            clip_end_ms=annotation.clip_end_ms,
+            timing_confidence=annotation.timing_confidence,
+            source_tool=annotation.source_tool,
+        )
+        for annotation in annotations
+    ]
+    manifest = ExportManifest(
+        project_id="project-1",
+        video_id="video-1",
+        timeline_ref="exports/latest/timeline.csv",
+        training_examples_ref="exports/latest/training_examples.jsonl",
+        clips_dir_ref="exports/latest/clips",
+        clip_count=4,
+        annotation_count=4,
+        training_example_count=4,
+    )
+    write_json(paths.root / "exports/latest/export_manifest.json", manifest)
+    write_jsonl(paths.root / "exports/latest/training_examples.jsonl", examples)
+    (paths.root / "exports/latest/clips").mkdir(parents=True)
+    for annotation in annotations:
+        (paths.root / f"exports/latest/clips/{annotation.annotation_id}.mp4").write_bytes(b"clip")
+
+    report = training_readiness_report(
+        paths,
+        annotations=load_annotations(paths),
+        coverage=[],
+        queue_items=[],
+        minimum_examples_per_action=2,
+    )
+
+    assert report["readiness"] == "Ready for baseline"
+    assert report["export_status"] == "present"
+    assert report["ready_action_count"] == 2
+    assert report["missing_clip_count"] == 0
+    assert report["blockers"] == []
+    assert report["improvements"] == []
+    rows_by_action = {str(row["action"]): row for row in report["action_rows"]}
+    assert rows_by_action["drive"]["status"] == "ready"
+    assert rows_by_action["drive"]["trusted_annotations"] == 2
+    assert rows_by_action["slice"]["status"] == "ready"
+
+
 def test_streamlit_entrypoint_exposes_export_button():
     source = __import__("pickleball_ai.ui_streamlit", fromlist=["run"])
 
@@ -557,3 +690,5 @@ def test_streamlit_entrypoint_exposes_export_button():
     assert "Promote to latest" in source.run.__code__.co_consts
     assert "Clip extraction failed: " in source.run.__code__.co_consts
     assert "Clear to unreviewed" in source.run.__code__.co_consts
+    assert "Training Readiness" in source.run.__code__.co_consts
+    assert "Ready for a baseline training run." in source.run.__code__.co_consts
